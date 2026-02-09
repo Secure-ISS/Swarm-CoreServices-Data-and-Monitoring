@@ -4,12 +4,12 @@
 
 ### Database Connection
 
-**Shared PostgreSQL Database:**
+**Project-Specific PostgreSQL Database:**
 - Host: localhost
 - Port: 5432
-- Database: qradar_vectors
-- User: qradar
-- Password: qradar_vectors_2026
+- Database: distributed_postgres_cluster
+- User: dpg_cluster
+- Password: dpg_cluster_2026
 
 **Project Namespace:** `distributed-postgres-cluster`
 
@@ -61,17 +61,18 @@ npx @claude-flow/cli@latest memory list --namespace distributed-postgres-cluster
 **Direct PostgreSQL Access:**
 
 ```sql
--- Connect to database
-psql -h localhost -U qradar -d qradar_vectors
+-- Connect to project database
+psql -h localhost -U dpg_cluster -d distributed_postgres_cluster
 
 -- List project memories
-SELECT key, value FROM memory_entries 
-WHERE namespace = 'distributed-postgres-cluster' 
+SELECT key, value FROM memory_entries
+WHERE namespace = 'distributed-postgres-cluster'
 ORDER BY created_at DESC;
 
--- Access shared knowledge
-SELECT key, value FROM memory_entries 
-WHERE namespace = 'claude-flow-v3-learnings' 
+-- Access shared knowledge (in shared database)
+psql -h localhost -U shared_user -d claude_flow_shared
+SELECT key, value FROM memory_entries
+WHERE namespace = 'claude-flow-v3-learnings'
 ORDER BY key;
 ```
 
