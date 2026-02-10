@@ -1,0 +1,221 @@
+# Prometheus Alert Rules for Distributed PostgreSQL
+# Save to: /etc/prometheus/rules/postgres_alerts.yml
+
+groups:
+  - name: distributed_postgres_alerts
+    interval: 30s
+    rules:
+      # ============================================
+      # Latency Alerts
+      # ============================================
+      - alert: HighVectorSearchLatency
+        expr: histogram_quantile(0.95, rate(vector_search_duration_seconds_bucket[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: vector_search
+        annotations:
+          summary: "High vector search latency detected"
+          description: "p95 latency is {{ $value | humanizeDuration }} (threshold: 50ms) for namespace {{ $labels.namespace }}"
+          runbook: "https://wiki.example.com/runbooks/high-vector-search-latency"
+
+      - alert: CriticalVectorSearchLatency
+        expr: histogram_quantile(0.95, rate(vector_search_duration_seconds_bucket[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          component: vector_search
+        annotations:
+          summary: "CRITICAL: Vector search latency exceeds 100ms"
+          description: "p95 latency is {{ $value | humanizeDuration }} for namespace {{ $labels.namespace }}"
+
+      # ============================================
+      # Replication Alerts
+      # ============================================
+      - alert: HighReplicationLag
+        expr: replication_lag_seconds > 10
+        for: 2m
+        labels:
+          severity: critical
+          component: replication
+        annotations:
+          summary: "High replication lag on {{ $labels.replica_name }}"
+          description: "Replication lag is {{ $value | humanizeDuration }} (threshold: 10s)"
+          impact: "Data consistency may be affected. Queries to replica may return stale data."
+          action: "Check replica health, network connectivity, and replica load"
+
+      - alert: ReplicationLagIncreasing
+        expr: rate(replication_lag_seconds[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: replication
+        annotations:
+          summary: "Replication lag is increasing on {{ $labels.replica_name }}"
+          description: "Lag is growing at {{ $value }} seconds/minute"
+
+      - alert: ReplicationBroken
+        expr: up{job="postgres_replication"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: replication
+        annotations:
+          summary: "Replication connection lost"
+          description: "Cannot connect to replica {{ $labels.replica_name }}"
+          impact: "No replication - data loss risk if primary fails"
+
+      # ============================================
+      # Connection Pool Alerts
+      # ============================================
+      - alert: ConnectionPoolExhaustion
+        expr: db_connections_active > 450
+        for: 5m
+        labels:
+          severity: warning
+          component: connections
+        annotations:
+          summary: "Connection pool nearing exhaustion"
+          description: "{{ $value }} connections active (max: 500)"
+          action: "Review slow queries, increase pool size, or scale database"
+
+      - alert: ConnectionPoolCritical
+        expr: db_connections_active > 480
+        for: 1m
+        labels:
+          severity: critical
+          component: connections
+        annotations:
+          summary: "CRITICAL: Connection pool nearly exhausted"
+          description: "{{ $value }} connections active (max: 500)"
+          impact: "New connections will be rejected"
+
+      - alert: HighIdleConnections
+        expr: db_connections_idle > 200
+        for: 10m
+        labels:
+          severity: info
+          component: connections
+        annotations:
+          summary: "High number of idle connections"
+          description: "{{ $value }} idle connections. Consider reducing pool size."
+
+      # ============================================
+      # Cache Performance Alerts
+      # ============================================
+      - alert: LowCacheHitRatio
+        expr: cache_hit_ratio < 0.9
+        for: 10m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Low cache hit ratio"
+          description: "Cache hit ratio is {{ $value | humanizePercentage }} (threshold: 90%)"
+          impact: "Increased disk I/O and query latency"
+          action: "Consider increasing shared_buffers or effective_cache_size"
+
+      - alert: CriticalCacheHitRatio
+        expr: cache_hit_ratio < 0.75
+        for: 5m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "CRITICAL: Very low cache hit ratio"
+          description: "Cache hit ratio is {{ $value | humanizePercentage }}"
+
+      # ============================================
+      # Throughput Alerts
+      # ============================================
+      - alert: LowQueryThroughput
+        expr: rate(vector_search_results_total[5m]) < 10
+        for: 10m
+        labels:
+          severity: warning
+          component: throughput
+        annotations:
+          summary: "Low query throughput"
+          description: "Only {{ $value | humanize }} QPS (expected: >100 QPS)"
+
+      - alert: HighErrorRate
+        expr: rate(vector_search_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: errors
+        annotations:
+          summary: "High vector search error rate"
+          description: "{{ $value }} errors/sec for namespace {{ $labels.namespace }}"
+          error_type: "{{ $labels.error_type }}"
+
+      # ============================================
+      # Storage Alerts
+      # ============================================
+      - alert: TableSizeGrowing
+        expr: rate(table_size_bytes[1h]) > 1073741824  # 1GB/hour
+        for: 2h
+        labels:
+          severity: info
+          component: storage
+        annotations:
+          summary: "Table {{ $labels.table_name }} growing rapidly"
+          description: "Table growing at {{ $value | humanize1024 }}/hour"
+
+      - alert: IndexBloat
+        expr: index_size_bytes / table_size_bytes{table_name=~".*"} > 2
+        for: 1h
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "Index bloat detected on {{ $labels.index_name }}"
+          description: "Index is {{ $value }}x table size. Consider REINDEX."
+
+      # ============================================
+      # Availability Alerts
+      # ============================================
+      - alert: DatabaseDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: availability
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "Cannot connect to database"
+          impact: "All services depending on database are affected"
+
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total{job="postgres"}[5m]) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          component: resources
+        annotations:
+          summary: "High CPU usage on database"
+          description: "CPU usage is {{ $value | humanizePercentage }}"
+
+      # ============================================
+      # Custom Business Logic Alerts
+      # ============================================
+      - alert: NoRecentVectorSearches
+        expr: rate(vector_search_results_total[15m]) == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: business_logic
+        annotations:
+          summary: "No vector searches in last 15 minutes"
+          description: "This is unusual. Check if application is down."
+
+      - alert: UnusuallyHighQueryVolume
+        expr: rate(vector_search_results_total[5m]) > 10000
+        for: 5m
+        labels:
+          severity: warning
+          component: business_logic
+        annotations:
+          summary: "Unusually high query volume"
+          description: "Query rate is {{ $value }} QPS (normal: 100-1000 QPS)"
+          impact: "Possible DDoS attack or application bug"

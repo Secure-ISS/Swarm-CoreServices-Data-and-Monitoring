@@ -1,0 +1,17 @@
+# Performance Testing & Monitoring Dependencies
+
+# Core dependencies
+asyncpg>=0.29.0        # Async PostgreSQL driver
+asyncio-pool>=0.6.0    # Async connection pooling
+numpy>=1.24.0          # Numerical operations
+python-dotenv>=1.0.0   # Environment variable management
+
+# Metrics & Monitoring
+prometheus-client>=0.19.0   # Prometheus metrics exporter
+
+# Load Testing
+locust>=2.20.0         # Load testing framework
+
+# Optional: Enhanced reporting
+pandas>=2.0.0          # Data analysis (optional)
+matplotlib>=3.7.0      # Plotting (optional)

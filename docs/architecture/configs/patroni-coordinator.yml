@@ -1,0 +1,159 @@
+---
+# Patroni Configuration for Citus Coordinators
+# Synchronous replication for metadata consistency
+
+scope: postgres-cluster-coordinators
+namespace: /service/
+name: coordinator-1  # Overridden by PATRONI_NAME env var
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: coordinator-1:8008  # Overridden by PATRONI_RESTAPI_CONNECT_ADDRESS
+
+etcd3:
+  hosts: etcd-1:2379,etcd-2:2379,etcd-3:2379
+  protocol: http
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576  # 1MB
+    synchronous_mode: true
+    synchronous_mode_strict: true
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        # Citus Configuration
+        shared_preload_libraries: citus,ruvector
+        citus.node_conninfo: 'sslmode=prefer'
+
+        # Connection Settings
+        max_connections: 100
+        superuser_reserved_connections: 5
+
+        # Memory Settings
+        shared_buffers: 2GB
+        effective_cache_size: 6GB
+        work_mem: 64MB
+        maintenance_work_mem: 512MB
+
+        # WAL Settings (for replication)
+        wal_level: replica
+        max_wal_senders: 10
+        max_replication_slots: 10
+        wal_keep_size: 1GB
+
+        # Synchronous Replication
+        synchronous_commit: 'on'
+        synchronous_standby_names: '*'
+
+        # Checkpoint Settings
+        checkpoint_timeout: 15min
+        checkpoint_completion_target: 0.9
+        max_wal_size: 4GB
+        min_wal_size: 1GB
+
+        # Query Planning
+        random_page_cost: 1.1  # SSD optimized
+        effective_io_concurrency: 200
+
+        # Logging
+        log_destination: stderr
+        logging_collector: on
+        log_directory: /var/log/postgresql
+        log_filename: 'postgresql-%Y-%m-%d_%H%M%S.log'
+        log_line_prefix: '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+        log_checkpoints: on
+        log_connections: on
+        log_disconnections: on
+        log_duration: off
+        log_lock_waits: on
+        log_statement: ddl
+        log_temp_files: 0
+        log_autovacuum_min_duration: 0
+
+        # Statistics
+        track_activities: on
+        track_counts: on
+        track_io_timing: on
+        track_functions: all
+
+        # Autovacuum
+        autovacuum: on
+        autovacuum_max_workers: 4
+        autovacuum_naptime: 30s
+
+        # RuVector Settings
+        ruvector.enable_hnsw: on
+        ruvector.hnsw_ef_search: 40
+
+  initdb:
+    - encoding: UTF8
+    - locale: en_US.UTF-8
+    - data-checksums
+
+  pg_hba:
+    - host replication replicator 0.0.0.0/0 md5
+    - host all all 0.0.0.0/0 md5
+    - host all all ::0/0 md5
+
+  users:
+    admin:
+      password: admin
+      options:
+        - createrole
+        - createdb
+
+  post_bootstrap: |
+    #!/bin/bash
+    # Initialize Citus coordinator
+    psql -U postgres -d postgres -c "CREATE EXTENSION IF NOT EXISTS citus;"
+    psql -U postgres -d postgres -c "CREATE EXTENSION IF NOT EXISTS ruvector;"
+
+    # Create application databases
+    psql -U postgres -c "CREATE DATABASE distributed_postgres_cluster;"
+    psql -U postgres -d distributed_postgres_cluster -c "CREATE EXTENSION citus;"
+    psql -U postgres -d distributed_postgres_cluster -c "CREATE EXTENSION ruvector;"
+
+    # Create MCP user
+    psql -U postgres -c "CREATE USER mcp_user WITH PASSWORD 'mcp_password';"
+    psql -U postgres -d distributed_postgres_cluster -c "GRANT CONNECT ON DATABASE distributed_postgres_cluster TO mcp_user;"
+    psql -U postgres -d distributed_postgres_cluster -c "GRANT USAGE ON SCHEMA public TO mcp_user;"
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: coordinator-1:5432  # Overridden by PATRONI_POSTGRESQL_CONNECT_ADDRESS
+  data_dir: /var/lib/postgresql/data
+  bin_dir: /usr/lib/postgresql/16/bin
+  pgpass: /tmp/pgpass0
+  authentication:
+    replication:
+      username: replicator
+      password: replication_password
+    superuser:
+      username: postgres
+      password: postgres_password
+    rewind:
+      username: rewind_user
+      password: rewind_password
+  parameters:
+    unix_socket_directories: '/var/run/postgresql'
+  create_replica_methods:
+    - basebackup
+  basebackup:
+    checkpoint: fast
+    max-rate: 100M
+
+watchdog:
+  mode: off  # Set to 'automatic' for production with STONITH
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false
+  role: coordinator
+  citus_role: coordinator

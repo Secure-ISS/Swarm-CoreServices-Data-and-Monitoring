@@ -5,6 +5,21 @@ in both project-specific and shared knowledge databases.
 """
 from typing import List, Dict, Any, Optional, Literal
 import json
+import logging
+from psycopg2 import DatabaseError, DataError, IntegrityError
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+
+class VectorOperationError(Exception):
+    """Raised when vector operation fails."""
+    pass
+
+
+class InvalidEmbeddingError(Exception):
+    """Raised when embedding dimensions are invalid."""
+    pass
 
 
 def store_memory(
@@ -26,25 +41,51 @@ def store_memory(
         embedding: Optional 384-dimensional vector embedding
         metadata: Optional JSON metadata
         tags: Optional list of tags
-    """
-    embedding_str = None
-    if embedding and len(embedding) == 384:
-        embedding_str = f"[{','.join(str(v) for v in embedding)}]"
 
-    cursor.execute("""
-        INSERT INTO memory_entries
-            (namespace, key, value, embedding, metadata, tags)
-        VALUES (%s, %s, %s, %s::ruvector, %s::jsonb, %s)
-        ON CONFLICT (namespace, key) DO UPDATE
-        SET value = EXCLUDED.value,
-            embedding = EXCLUDED.embedding,
-            metadata = EXCLUDED.metadata,
-            tags = EXCLUDED.tags,
-            updated_at = NOW()
-    """, (
-        namespace, key, value, embedding_str,
-        json.dumps(metadata or {}), tags
-    ))
+    Raises:
+        InvalidEmbeddingError: If embedding dimensions != 384
+        VectorOperationError: If database operation fails
+    """
+    # Validate inputs
+    if not namespace or not key or not value:
+        raise ValueError("namespace, key, and value are required")
+
+    embedding_str = None
+    if embedding:
+        if len(embedding) != 384:
+            raise InvalidEmbeddingError(
+                f"Expected 384-dimensional embedding, got {len(embedding)}"
+            )
+        try:
+            embedding_str = f"[{','.join(str(v) for v in embedding)}]"
+        except Exception as e:
+            raise InvalidEmbeddingError(f"Invalid embedding format: {e}") from e
+
+    try:
+        cursor.execute("""
+            INSERT INTO memory_entries
+                (namespace, key, value, embedding, metadata, tags)
+            VALUES (%s, %s, %s, %s::ruvector, %s::jsonb, %s)
+            ON CONFLICT (namespace, key) DO UPDATE
+            SET value = EXCLUDED.value,
+                embedding = EXCLUDED.embedding,
+                metadata = EXCLUDED.metadata,
+                tags = EXCLUDED.tags,
+                updated_at = NOW()
+        """, (
+            namespace, key, value, embedding_str,
+            json.dumps(metadata or {}), tags
+        ))
+        logger.debug(f"Stored memory: {namespace}/{key}")
+    except IntegrityError as e:
+        logger.error(f"Integrity error storing memory: {e}")
+        raise VectorOperationError(f"Cannot store memory (integrity violation): {e}") from e
+    except DataError as e:
+        logger.error(f"Data error storing memory: {e}")
+        raise VectorOperationError(f"Invalid data format: {e}") from e
+    except DatabaseError as e:
+        logger.error(f"Database error storing memory: {e}")
+        raise VectorOperationError(f"Database operation failed: {e}") from e
 
 
 def search_memory(
@@ -60,35 +101,64 @@ def search_memory(
         cursor: Database cursor
         namespace: Namespace to search within
         query_embedding: 384-dimensional query vector
-        limit: Maximum number of results
+        limit: Maximum number of results (1-1000)
         min_similarity: Minimum cosine similarity (0-1)
 
     Returns:
         List of matching memory entries with similarity scores
+
+    Raises:
+        InvalidEmbeddingError: If query embedding dimensions != 384
+        VectorOperationError: If search operation fails
     """
+    # Validate inputs
+    if not namespace:
+        raise ValueError("namespace is required")
+
     if len(query_embedding) != 384:
-        raise ValueError(f"Expected 384-dimensional embedding, got {len(query_embedding)}")
+        raise InvalidEmbeddingError(
+            f"Expected 384-dimensional embedding, got {len(query_embedding)}"
+        )
 
-    embedding_str = f"[{','.join(str(v) for v in query_embedding)}]"
+    if not 0 <= min_similarity <= 1:
+        raise ValueError(f"min_similarity must be between 0 and 1, got {min_similarity}")
 
-    cursor.execute("""
-        SELECT
-            namespace, key, value, metadata, tags,
-            1 - (embedding <=> %s::ruvector) as similarity,
-            created_at
-        FROM memory_entries
-        WHERE namespace = %s
-          AND embedding IS NOT NULL
-          AND (1 - (embedding <=> %s::ruvector)) >= %s
-        ORDER BY embedding <=> %s::ruvector
-        LIMIT %s
-    """, (
-        embedding_str, namespace,
-        embedding_str, min_similarity,
-        embedding_str, limit
-    ))
+    if not 1 <= limit <= 1000:
+        raise ValueError(f"limit must be between 1 and 1000, got {limit}")
 
-    return [dict(row) for row in cursor.fetchall()]
+    try:
+        embedding_str = f"[{','.join(str(v) for v in query_embedding)}]"
+    except Exception as e:
+        raise InvalidEmbeddingError(f"Invalid embedding format: {e}") from e
+
+    try:
+        cursor.execute("""
+            SELECT
+                namespace, key, value, metadata, tags,
+                1 - (embedding <=> %s::ruvector) as similarity,
+                created_at
+            FROM memory_entries
+            WHERE namespace = %s
+              AND embedding IS NOT NULL
+              AND (1 - (embedding <=> %s::ruvector)) >= %s
+            ORDER BY embedding <=> %s::ruvector
+            LIMIT %s
+        """, (
+            embedding_str, namespace,
+            embedding_str, min_similarity,
+            embedding_str, limit
+        ))
+
+        results = [dict(row) for row in cursor.fetchall()]
+        logger.debug(f"Search found {len(results)} results in {namespace}")
+        return results
+
+    except DataError as e:
+        logger.error(f"Data error in search: {e}")
+        raise VectorOperationError(f"Invalid search parameters: {e}") from e
+    except DatabaseError as e:
+        logger.error(f"Database error in search: {e}")
+        raise VectorOperationError(f"Search operation failed: {e}") from e
 
 
 def retrieve_memory(
@@ -105,15 +175,28 @@ def retrieve_memory(
 
     Returns:
         Memory entry dict or None if not found
-    """
-    cursor.execute("""
-        SELECT namespace, key, value, metadata, tags, created_at, updated_at
-        FROM memory_entries
-        WHERE namespace = %s AND key = %s
-    """, (namespace, key))
 
-    result = cursor.fetchone()
-    return dict(result) if result else None
+    Raises:
+        VectorOperationError: If database operation fails
+    """
+    if not namespace or not key:
+        raise ValueError("namespace and key are required")
+
+    try:
+        cursor.execute("""
+            SELECT namespace, key, value, metadata, tags, created_at, updated_at
+            FROM memory_entries
+            WHERE namespace = %s AND key = %s
+        """, (namespace, key))
+
+        result = cursor.fetchone()
+        if result:
+            logger.debug(f"Retrieved memory: {namespace}/{key}")
+        return dict(result) if result else None
+
+    except DatabaseError as e:
+        logger.error(f"Database error retrieving memory: {e}")
+        raise VectorOperationError(f"Retrieve operation failed: {e}") from e
 
 
 def list_memories(
@@ -158,14 +241,28 @@ def delete_memory(
 
     Returns:
         True if deleted, False if not found
-    """
-    cursor.execute("""
-        DELETE FROM memory_entries
-        WHERE namespace = %s AND key = %s
-        RETURNING id
-    """, (namespace, key))
 
-    return cursor.fetchone() is not None
+    Raises:
+        VectorOperationError: If database operation fails
+    """
+    if not namespace or not key:
+        raise ValueError("namespace and key are required")
+
+    try:
+        cursor.execute("""
+            DELETE FROM memory_entries
+            WHERE namespace = %s AND key = %s
+            RETURNING id
+        """, (namespace, key))
+
+        deleted = cursor.fetchone() is not None
+        if deleted:
+            logger.debug(f"Deleted memory: {namespace}/{key}")
+        return deleted
+
+    except DatabaseError as e:
+        logger.error(f"Database error deleting memory: {e}")
+        raise VectorOperationError(f"Delete operation failed: {e}") from e
 
 
 def count_memories(

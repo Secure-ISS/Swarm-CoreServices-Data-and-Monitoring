@@ -1,0 +1,523 @@
+{
+  "name": "postgres-mesh-manager",
+  "version": "1.0.0",
+  "description": "Komodo MCP Server for Distributed PostgreSQL Mesh Management",
+  "server": {
+    "command": "python",
+    "args": ["-m", "mcp_server"],
+    "env": {
+      "STACK_PATH": "/home/matt/projects/Distributed-Postgress-Cluster/deployment/docker-swarm",
+      "SCRIPTS_PATH": "/home/matt/projects/Distributed-Postgress-Cluster/scripts/deployment"
+    }
+  },
+  "tools": [
+    {
+      "name": "postgres_mesh_deploy",
+      "description": "Deploy the PostgreSQL distributed mesh cluster to Docker Swarm",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stack_name": {
+            "type": "string",
+            "description": "Name for the Docker stack (default: postgres-mesh)",
+            "default": "postgres-mesh"
+          },
+          "coordinator_replicas": {
+            "type": "integer",
+            "description": "Number of coordinator replicas (default: 1)",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 1
+          },
+          "worker_replicas": {
+            "type": "integer",
+            "description": "Number of worker node replicas (default: 3)",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 10
+          },
+          "pooler_replicas": {
+            "type": "integer",
+            "description": "Number of PgBouncer pooler replicas (default: 2)",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 5
+          },
+          "environment": {
+            "type": "string",
+            "description": "Deployment environment (dev, staging, production)",
+            "enum": ["dev", "staging", "production"],
+            "default": "production"
+          },
+          "enable_backup": {
+            "type": "boolean",
+            "description": "Enable automated backup service",
+            "default": true
+          },
+          "enable_monitoring": {
+            "type": "boolean",
+            "description": "Enable health monitoring service",
+            "default": true
+          }
+        },
+        "required": ["stack_name"]
+      }
+    },
+    {
+      "name": "postgres_mesh_scale_workers",
+      "description": "Scale the number of PostgreSQL worker nodes in the mesh",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stack_name": {
+            "type": "string",
+            "description": "Name of the Docker stack",
+            "default": "postgres-mesh"
+          },
+          "worker_count": {
+            "type": "integer",
+            "description": "Target number of worker nodes",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "scale_mode": {
+            "type": "string",
+            "description": "Scaling strategy (rolling, immediate)",
+            "enum": ["rolling", "immediate"],
+            "default": "rolling"
+          },
+          "drain_timeout": {
+            "type": "integer",
+            "description": "Timeout in seconds for draining connections when scaling down",
+            "default": 300,
+            "minimum": 60,
+            "maximum": 3600
+          }
+        },
+        "required": ["worker_count"]
+      }
+    },
+    {
+      "name": "postgres_mesh_add_worker",
+      "description": "Add a new worker node to the PostgreSQL mesh",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stack_name": {
+            "type": "string",
+            "description": "Name of the Docker stack",
+            "default": "postgres-mesh"
+          },
+          "worker_id": {
+            "type": "string",
+            "description": "Unique identifier for the new worker node",
+            "pattern": "^worker-[0-9]+$"
+          },
+          "node_constraint": {
+            "type": "string",
+            "description": "Optional placement constraint for the worker (e.g., node.hostname==worker1)",
+            "default": null
+          },
+          "cpu_limit": {
+            "type": "number",
+            "description": "CPU limit in cores (default: 2)",
+            "default": 2,
+            "minimum": 0.5,
+            "maximum": 8
+          },
+          "memory_limit": {
+            "type": "string",
+            "description": "Memory limit (default: 4G)",
+            "default": "4G",
+            "pattern": "^[0-9]+(M|G)$"
+          },
+          "replication_sync": {
+            "type": "boolean",
+            "description": "Enable synchronous replication for this worker",
+            "default": false
+          }
+        },
+        "required": ["worker_id"]
+      }
+    },
+    {
+      "name": "postgres_mesh_remove_worker",
+      "description": "Safely remove a worker node from the PostgreSQL mesh",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stack_name": {
+            "type": "string",
+            "description": "Name of the Docker stack",
+            "default": "postgres-mesh"
+          },
+          "worker_id": {
+            "type": "string",
+            "description": "ID of the worker node to remove",
+            "pattern": "^worker-[0-9]+$"
+          },
+          "drain_mode": {
+            "type": "string",
+            "description": "How to drain connections (graceful, force)",
+            "enum": ["graceful", "force"],
+            "default": "graceful"
+          },
+          "drain_timeout": {
+            "type": "integer",
+            "description": "Timeout in seconds for draining (default: 300)",
+            "default": 300,
+            "minimum": 60,
+            "maximum": 3600
+          },
+          "redistribute_data": {
+            "type": "boolean",
+            "description": "Redistribute data to remaining workers before removal",
+            "default": true
+          }
+        },
+        "required": ["worker_id"]
+      }
+    },
+    {
+      "name": "postgres_mesh_health_check",
+      "description": "Perform comprehensive health check on the PostgreSQL mesh cluster",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stack_name": {
+            "type": "string",
+            "description": "Name of the Docker stack",
+            "default": "postgres-mesh"
+          },
+          "check_level": {
+            "type": "string",
+            "description": "Depth of health check (basic, standard, comprehensive)",
+            "enum": ["basic", "standard", "comprehensive"],
+            "default": "standard"
+          },
+          "include_metrics": {
+            "type": "boolean",
+            "description": "Include performance metrics in the health report",
+            "default": true
+          },
+          "check_replication": {
+            "type": "boolean",
+            "description": "Check replication lag and status",
+            "default": true
+          },
+          "check_connections": {
+            "type": "boolean",
+            "description": "Check connection pooling and active connections",
+            "default": true
+          }
+        }
+      }
+    },
+    {
+      "name": "postgres_mesh_backup",
+      "description": "Trigger a distributed backup of the PostgreSQL mesh cluster",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stack_name": {
+            "type": "string",
+            "description": "Name of the Docker stack",
+            "default": "postgres-mesh"
+          },
+          "backup_type": {
+            "type": "string",
+            "description": "Type of backup to perform",
+            "enum": ["full", "incremental", "differential"],
+            "default": "full"
+          },
+          "backup_location": {
+            "type": "string",
+            "description": "Backup storage location (local, s3, nfs)",
+            "enum": ["local", "s3", "nfs"],
+            "default": "local"
+          },
+          "compression": {
+            "type": "string",
+            "description": "Compression algorithm",
+            "enum": ["none", "gzip", "zstd"],
+            "default": "zstd"
+          },
+          "include_metadata": {
+            "type": "boolean",
+            "description": "Include cluster metadata in backup",
+            "default": true
+          },
+          "parallel_workers": {
+            "type": "integer",
+            "description": "Number of parallel backup workers (default: 4)",
+            "default": 4,
+            "minimum": 1,
+            "maximum": 8
+          }
+        }
+      }
+    },
+    {
+      "name": "postgres_mesh_restore",
+      "description": "Restore the PostgreSQL mesh cluster from a backup",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stack_name": {
+            "type": "string",
+            "description": "Name of the Docker stack",
+            "default": "postgres-mesh"
+          },
+          "backup_id": {
+            "type": "string",
+            "description": "ID or path of the backup to restore"
+          },
+          "restore_mode": {
+            "type": "string",
+            "description": "Restoration mode",
+            "enum": ["full", "point-in-time"],
+            "default": "full"
+          },
+          "target_time": {
+            "type": "string",
+            "description": "Target timestamp for point-in-time recovery (ISO 8601 format)",
+            "format": "date-time"
+          },
+          "restore_workers": {
+            "type": "array",
+            "description": "List of worker IDs to restore (empty = all workers)",
+            "items": {
+              "type": "string",
+              "pattern": "^worker-[0-9]+$"
+            },
+            "default": []
+          },
+          "parallel_restore": {
+            "type": "boolean",
+            "description": "Enable parallel restoration across workers",
+            "default": true
+          }
+        },
+        "required": ["backup_id"]
+      }
+    },
+    {
+      "name": "postgres_mesh_config_update",
+      "description": "Update configuration for the PostgreSQL mesh cluster",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stack_name": {
+            "type": "string",
+            "description": "Name of the Docker stack",
+            "default": "postgres-mesh"
+          },
+          "target": {
+            "type": "string",
+            "description": "Target component to update",
+            "enum": ["coordinator", "workers", "pooler", "all"],
+            "default": "all"
+          },
+          "config_changes": {
+            "type": "object",
+            "description": "Configuration parameters to update (key-value pairs)",
+            "additionalProperties": {
+              "type": ["string", "number", "boolean"]
+            }
+          },
+          "apply_mode": {
+            "type": "string",
+            "description": "How to apply configuration changes",
+            "enum": ["immediate", "rolling", "scheduled"],
+            "default": "rolling"
+          },
+          "restart_required": {
+            "type": "boolean",
+            "description": "Whether restart is required for changes to take effect",
+            "default": false
+          },
+          "validate_before_apply": {
+            "type": "boolean",
+            "description": "Validate configuration before applying",
+            "default": true
+          }
+        },
+        "required": ["config_changes"]
+      }
+    },
+    {
+      "name": "postgres_mesh_status",
+      "description": "Get detailed status of the PostgreSQL mesh cluster",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stack_name": {
+            "type": "string",
+            "description": "Name of the Docker stack",
+            "default": "postgres-mesh"
+          },
+          "format": {
+            "type": "string",
+            "description": "Output format",
+            "enum": ["json", "table", "summary"],
+            "default": "json"
+          },
+          "include_services": {
+            "type": "boolean",
+            "description": "Include service-level details",
+            "default": true
+          },
+          "include_nodes": {
+            "type": "boolean",
+            "description": "Include node-level details",
+            "default": true
+          },
+          "include_performance": {
+            "type": "boolean",
+            "description": "Include performance metrics",
+            "default": false
+          }
+        }
+      }
+    },
+    {
+      "name": "postgres_mesh_failover",
+      "description": "Trigger manual failover for the coordinator or a worker node",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stack_name": {
+            "type": "string",
+            "description": "Name of the Docker stack",
+            "default": "postgres-mesh"
+          },
+          "node_type": {
+            "type": "string",
+            "description": "Type of node to failover",
+            "enum": ["coordinator", "worker"],
+            "default": "coordinator"
+          },
+          "node_id": {
+            "type": "string",
+            "description": "ID of the node to failover (required for worker failover)"
+          },
+          "failover_mode": {
+            "type": "string",
+            "description": "Failover mode",
+            "enum": ["graceful", "immediate"],
+            "default": "graceful"
+          },
+          "promote_replica": {
+            "type": "string",
+            "description": "Specific replica to promote (optional, auto-select if not specified)"
+          }
+        }
+      }
+    },
+    {
+      "name": "postgres_mesh_rebalance",
+      "description": "Rebalance data distribution across worker nodes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stack_name": {
+            "type": "string",
+            "description": "Name of the Docker stack",
+            "default": "postgres-mesh"
+          },
+          "rebalance_strategy": {
+            "type": "string",
+            "description": "Rebalancing strategy",
+            "enum": ["equal", "weighted", "capacity-based"],
+            "default": "capacity-based"
+          },
+          "threshold": {
+            "type": "number",
+            "description": "Imbalance threshold percentage to trigger rebalancing",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 50
+          },
+          "max_concurrent_moves": {
+            "type": "integer",
+            "description": "Maximum concurrent data movements",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 5
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Perform dry run without actual data movement",
+            "default": false
+          }
+        }
+      }
+    }
+  ],
+  "resources": [
+    {
+      "uri": "postgres-mesh://cluster/status",
+      "name": "Cluster Status",
+      "description": "Real-time status of the PostgreSQL mesh cluster",
+      "mimeType": "application/json"
+    },
+    {
+      "uri": "postgres-mesh://cluster/metrics",
+      "name": "Cluster Metrics",
+      "description": "Performance metrics for the cluster",
+      "mimeType": "application/json"
+    },
+    {
+      "uri": "postgres-mesh://cluster/topology",
+      "name": "Cluster Topology",
+      "description": "Current topology of the distributed mesh",
+      "mimeType": "application/json"
+    },
+    {
+      "uri": "postgres-mesh://backups/list",
+      "name": "Backup List",
+      "description": "List of available backups",
+      "mimeType": "application/json"
+    }
+  ],
+  "prompts": [
+    {
+      "name": "deploy_cluster",
+      "description": "Deploy a new PostgreSQL mesh cluster with recommended settings",
+      "arguments": [
+        {
+          "name": "environment",
+          "description": "Target environment (dev, staging, production)",
+          "required": true
+        },
+        {
+          "name": "worker_count",
+          "description": "Number of worker nodes",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "scale_cluster",
+      "description": "Scale the cluster up or down based on load",
+      "arguments": [
+        {
+          "name": "target_workers",
+          "description": "Target number of worker nodes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "backup_restore_workflow",
+      "description": "Complete backup and restore workflow",
+      "arguments": [
+        {
+          "name": "operation",
+          "description": "backup or restore",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

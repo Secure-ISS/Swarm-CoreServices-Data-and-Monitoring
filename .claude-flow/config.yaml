@@ -1,0 +1,156 @@
+# Claude Flow V3 Runtime Configuration
+# PostgreSQL + RuVector Backend
+# Generated: 2026-02-09
+
+version: "3.0.0"
+
+# Swarm Configuration
+swarm:
+  topology: hierarchical-mesh
+  maxAgents: 15
+  autoScale: true
+  coordinationStrategy: raft
+  strategy: specialized
+
+# Memory Configuration (PostgreSQL + RuVector)
+memory:
+  backend: postgresql
+  enableHNSW: true
+  persistPath: .claude-flow/data
+  cacheSize: 256
+
+  # PostgreSQL Connection Settings
+  postgresql:
+    # Project Database
+    project:
+      host: localhost
+      port: 5432
+      database: distributed_postgres_cluster
+      user: dpg_cluster
+      password: dpg_cluster_2026
+      namespace: distributed-postgres-cluster
+      poolSize: 10
+      maxRetries: 3
+      connectionTimeout: 5000
+
+    # Shared Knowledge Database
+    shared:
+      host: localhost
+      port: 5432
+      database: claude_flow_shared
+      user: shared_user
+      password: shared_knowledge_2026
+      namespace: claude-flow-v3-learnings
+      poolSize: 5
+      maxRetries: 3
+      connectionTimeout: 5000
+
+  # HNSW Configuration
+  hnsw:
+    enabled: true
+    m: 16
+    efConstruction: 200
+    efSearch: 200
+
+  # Embeddings
+  embeddings:
+    model: all-MiniLM-L6-v2
+    dimensions: 384
+    provider: onnx
+    cacheEnabled: true
+
+  # ADR-049: Self-Learning Memory
+  learningBridge:
+    enabled: true
+    sonaMode: balanced
+    confidenceDecayRate: 0.005
+    accessBoostAmount: 0.03
+    consolidationThreshold: 10
+
+  # Memory Graph
+  memoryGraph:
+    enabled: true
+    pageRankDamping: 0.85
+    maxNodes: 10000
+    similarityThreshold: 0.7
+
+  # Agent Scopes
+  agentScopes:
+    enabled: true
+    defaultScope: project
+
+# Neural Configuration
+neural:
+  enabled: true
+  modelPath: .claude-flow/neural
+
+  # SONA (Self-Optimizing Neural Architecture)
+  sona:
+    enabled: true
+    learningRate: 0.001
+    adaptationThreshold: 0.05
+
+  # Mixture of Experts
+  moe:
+    enabled: true
+    numExperts: 8
+
+  # Elastic Weight Consolidation
+  ewc:
+    enabled: true
+    lambda: 0.4
+
+# Hooks Configuration
+hooks:
+  enabled: true
+  autoExecute: true
+
+# MCP Server
+mcp:
+  autoStart: false
+  port: 3000
+  host: localhost
+  transport: stdio
+
+# Daemon Configuration
+daemon:
+  autoStart: true
+  maxConcurrent: 2
+  workerTimeoutMs: 300000
+
+  workers:
+    map:
+      enabled: true
+      intervalMs: 900000
+      priority: normal
+    audit:
+      enabled: true
+      intervalMs: 600000
+      priority: critical
+    optimize:
+      enabled: true
+      intervalMs: 900000
+      priority: high
+    consolidate:
+      enabled: true
+      intervalMs: 1800000
+      priority: low
+    testgaps:
+      enabled: true
+      intervalMs: 1200000
+      priority: normal
+    predict:
+      enabled: false
+      intervalMs: 600000
+      priority: low
+    document:
+      enabled: false
+      intervalMs: 3600000
+      priority: low
+
+# Performance Targets
+performance:
+  targetLatency:
+    vectorSearch: 50
+    memoryRetrieval: 5
+    embeddingGeneration: 10
