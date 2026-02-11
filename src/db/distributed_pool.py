@@ -10,17 +10,20 @@ cluster with support for:
 - Distributed transaction coordination
 """
 
-import os
-import time
-import random
+# Standard library imports
 import hashlib
 import logging
-from typing import List, Dict, Any, Optional, Tuple, Callable
+import os
+import random
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# Third-party imports
 import psycopg2
-from psycopg2 import pool, OperationalError, DatabaseError
+from psycopg2 import DatabaseError, OperationalError, pool
 from psycopg2.extras import RealDictCursor
 
 # Configure logging
@@ -30,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 class NodeRole(Enum):
     """Database node role."""
+
     COORDINATOR = "coordinator"
     WORKER = "worker"
     REPLICA = "replica"
@@ -37,6 +41,7 @@ class NodeRole(Enum):
 
 class QueryType(Enum):
     """Query type for routing decisions."""
+
     READ = "read"
     WRITE = "write"
     DDL = "ddl"
@@ -45,17 +50,20 @@ class QueryType(Enum):
 
 class DistributedConnectionError(Exception):
     """Raised when distributed connection operation fails."""
+
     pass
 
 
 class ShardingError(Exception):
     """Raised when sharding operation fails."""
+
     pass
 
 
 @dataclass
 class DatabaseNode:
     """Represents a database node in the cluster."""
+
     host: str
     port: int
     database: str
@@ -78,6 +86,7 @@ class DatabaseNode:
 @dataclass
 class RetryConfig:
     """Configuration for connection retry logic."""
+
     max_retries: int = 3
     initial_backoff: float = 0.1
     max_backoff: float = 10.0
@@ -104,7 +113,7 @@ class DistributedDatabasePool:
         replica_nodes: Optional[List[DatabaseNode]] = None,
         retry_config: Optional[RetryConfig] = None,
         enable_health_check: bool = True,
-        health_check_interval: int = 60
+        health_check_interval: int = 60,
     ):
         """Initialize distributed database pool.
 
@@ -137,11 +146,11 @@ class DistributedDatabasePool:
 
         # Statistics
         self._query_stats: Dict[str, int] = {
-            'total': 0,
-            'reads': 0,
-            'writes': 0,
-            'errors': 0,
-            'retries': 0
+            "total": 0,
+            "reads": 0,
+            "writes": 0,
+            "errors": 0,
+            "retries": 0,
         }
 
         # Initialize pools
@@ -151,13 +160,17 @@ class DistributedDatabasePool:
         """Initialize all connection pools."""
         try:
             # Coordinator pool
-            logger.info(f"Initializing coordinator pool: {self.coordinator.host}:{self.coordinator.port}")
+            logger.info(
+                f"Initializing coordinator pool: {self.coordinator.host}:{self.coordinator.port}"
+            )
             self._coordinator_pool = self._create_pool(self.coordinator)
             self._node_health[f"{self.coordinator.host}:{self.coordinator.port}"] = True
 
             # Worker pools (indexed by shard_id)
             for worker in self.workers:
-                logger.info(f"Initializing worker pool: {worker.host}:{worker.port} (shard {worker.shard_id})")
+                logger.info(
+                    f"Initializing worker pool: {worker.host}:{worker.port} (shard {worker.shard_id})"
+                )
                 if worker.shard_id is None:
                     logger.warning(f"Worker {worker.host}:{worker.port} has no shard_id")
                     continue
@@ -172,7 +185,9 @@ class DistributedDatabasePool:
                 self._replica_pools.append(replica_pool)
                 self._node_health[f"{replica.host}:{replica.port}"] = True
 
-            logger.info(f"✓ Initialized distributed pool: 1 coordinator, {len(self.workers)} workers, {len(self.replicas)} replicas")
+            logger.info(
+                f"✓ Initialized distributed pool: 1 coordinator, {len(self.workers)} workers, {len(self.replicas)} replicas"
+            )
 
         except Exception as e:
             logger.error(f"✗ Failed to initialize distributed pool: {e}")
@@ -181,19 +196,42 @@ class DistributedDatabasePool:
 
     def _create_pool(self, node: DatabaseNode) -> pool.ThreadedConnectionPool:
         """Create a connection pool for a specific node."""
+        # Build connection parameters with SSL/TLS support
+        conn_params = {
+            "minconn": node.min_connections,
+            "maxconn": node.max_connections,
+            "host": node.host,
+            "port": node.port,
+            "database": node.database,
+            "user": node.user,
+            "password": node.password,
+            "cursor_factory": RealDictCursor,
+            "connect_timeout": 10,
+            "options": "-c statement_timeout=30000",  # 30s statement timeout
+        }
+
+        # Add SSL/TLS configuration
+        sslmode = os.getenv("DISTRIBUTED_SSLMODE", "prefer")
+        if sslmode != "disable":
+            conn_params["sslmode"] = sslmode
+
+            # Add SSL certificate paths if provided
+            sslrootcert = os.getenv("DISTRIBUTED_SSLROOTCERT")
+            if sslrootcert and os.path.exists(sslrootcert):
+                conn_params["sslrootcert"] = sslrootcert
+
+            sslcert = os.getenv("DISTRIBUTED_SSLCERT")
+            if sslcert and os.path.exists(sslcert):
+                conn_params["sslcert"] = sslcert
+
+            sslkey = os.getenv("DISTRIBUTED_SSLKEY")
+            if sslkey and os.path.exists(sslkey):
+                conn_params["sslkey"] = sslkey
+
+            logger.info(f"Distributed pool SSL mode for {node.host}:{node.port}: {sslmode}")
+
         try:
-            return psycopg2.pool.ThreadedConnectionPool(
-                minconn=node.min_connections,
-                maxconn=node.max_connections,
-                host=node.host,
-                port=node.port,
-                database=node.database,
-                user=node.user,
-                password=node.password,
-                cursor_factory=RealDictCursor,
-                connect_timeout=10,
-                options='-c statement_timeout=30000'  # 30s statement timeout
-            )
+            return psycopg2.pool.ThreadedConnectionPool(**conn_params)
         except OperationalError as e:
             raise DistributedConnectionError(
                 f"Cannot connect to {node.host}:{node.port}. Error: {e}"
@@ -220,25 +258,30 @@ class DistributedDatabasePool:
                 return operation()
             except (OperationalError, DatabaseError) as e:
                 last_error = e
-                self._query_stats['retries'] += 1
+                self._query_stats["retries"] += 1
 
                 if attempt < self.retry_config.max_retries - 1:
                     # Add jitter to prevent thundering herd
                     sleep_time = backoff
                     if self.retry_config.jitter:
-                        sleep_time *= (0.5 + random.random())
+                        sleep_time *= 0.5 + random.random()
 
                     logger.warning(
                         f"Retry {attempt + 1}/{self.retry_config.max_retries} for {operation_name} "
                         f"after {sleep_time:.2f}s. Error: {e}"
                     )
                     time.sleep(sleep_time)
-                    backoff = min(backoff * self.retry_config.backoff_multiplier, self.retry_config.max_backoff)
+                    backoff = min(
+                        backoff * self.retry_config.backoff_multiplier,
+                        self.retry_config.max_backoff,
+                    )
                 else:
                     logger.error(f"All retries exhausted for {operation_name}")
 
-        self._query_stats['errors'] += 1
-        raise DistributedConnectionError(f"{operation_name} failed after {self.retry_config.max_retries} retries: {last_error}")
+        self._query_stats["errors"] += 1
+        raise DistributedConnectionError(
+            f"{operation_name} failed after {self.retry_config.max_retries} retries: {last_error}"
+        )
 
     def _get_shard_for_key(self, shard_key: Any) -> int:
         """Determine shard ID for a given shard key.
@@ -254,7 +297,7 @@ class DistributedDatabasePool:
 
         # Hash the shard key
         key_str = str(shard_key)
-        hash_value = int(hashlib.md5(key_str.encode()).hexdigest(), 16)
+        hash_value = int(hashlib.md5(key_str.encode(), usedforsecurity=False).hexdigest(), 16)
 
         # Modulo to get shard
         num_shards = len(self.workers)
@@ -273,7 +316,7 @@ class DistributedDatabasePool:
             return self._coordinator_pool
 
         # Simple round-robin (could be enhanced with weights)
-        idx = self._query_stats['reads'] % len(self._replica_pools)
+        idx = self._query_stats["reads"] % len(self._replica_pools)
         return self._replica_pools[idx]
 
     @contextmanager
@@ -281,7 +324,7 @@ class DistributedDatabasePool:
         self,
         query_type: QueryType = QueryType.WRITE,
         shard_key: Optional[Any] = None,
-        preferred_node: Optional[str] = None
+        preferred_node: Optional[str] = None,
     ):
         """Get a cursor with automatic routing to appropriate node.
 
@@ -316,23 +359,24 @@ class DistributedDatabasePool:
         # Route to appropriate pool
         if query_type == QueryType.READ and self._replica_pools:
             selected_pool = self._select_replica_pool()
-            self._query_stats['reads'] += 1
+            self._query_stats["reads"] += 1
         elif shard_key is not None and self.workers:
             shard_id = self._get_shard_for_key(shard_key)
             selected_pool = self._worker_pools.get(shard_id, self._coordinator_pool)
-            self._query_stats['writes'] += 1
+            self._query_stats["writes"] += 1
         else:
             selected_pool = self._coordinator_pool
             if query_type == QueryType.WRITE:
-                self._query_stats['writes'] += 1
+                self._query_stats["writes"] += 1
             else:
-                self._query_stats['reads'] += 1
+                self._query_stats["reads"] += 1
 
-        self._query_stats['total'] += 1
+        self._query_stats["total"] += 1
 
         # Execute with retry
         conn = None
         try:
+
             def get_conn():
                 return selected_pool.getconn()
 
@@ -346,13 +390,13 @@ class DistributedDatabasePool:
             if conn:
                 conn.rollback()
             logger.error(f"Database error: {e}")
-            self._query_stats['errors'] += 1
+            self._query_stats["errors"] += 1
             raise
         except Exception as e:
             if conn:
                 conn.rollback()
             logger.error(f"Unexpected error: {e}")
-            self._query_stats['errors'] += 1
+            self._query_stats["errors"] += 1
             raise DistributedConnectionError(f"Transaction failed: {e}") from e
         finally:
             if conn:
@@ -410,7 +454,9 @@ class DistributedDatabasePool:
             for shard_id, cur in cursors.items():
                 cur.execute(f"COMMIT PREPARED '{transaction_id}_{shard_id}'")
 
-            logger.info(f"Distributed transaction {transaction_id} committed across {len(shard_ids)} shards")
+            logger.info(
+                f"Distributed transaction {transaction_id} committed across {len(shard_ids)} shards"
+            )
 
         except Exception as e:
             logger.error(f"Distributed transaction {transaction_id} failed: {e}")
@@ -434,6 +480,7 @@ class DistributedDatabasePool:
 
     def _perform_health_check(self):
         """Perform health check on all nodes."""
+
         def check_pool(pool_obj, node_key):
             try:
                 conn = pool_obj.getconn()
@@ -469,29 +516,31 @@ class DistributedDatabasePool:
         self._perform_health_check()
 
         return {
-            'coordinator': {
-                'host': self.coordinator.host,
-                'port': self.coordinator.port,
-                'healthy': self._node_health.get(f"{self.coordinator.host}:{self.coordinator.port}", False)
+            "coordinator": {
+                "host": self.coordinator.host,
+                "port": self.coordinator.port,
+                "healthy": self._node_health.get(
+                    f"{self.coordinator.host}:{self.coordinator.port}", False
+                ),
             },
-            'workers': [
+            "workers": [
                 {
-                    'shard_id': worker.shard_id,
-                    'host': worker.host,
-                    'port': worker.port,
-                    'healthy': self._node_health.get(f"{worker.host}:{worker.port}", False)
+                    "shard_id": worker.shard_id,
+                    "host": worker.host,
+                    "port": worker.port,
+                    "healthy": self._node_health.get(f"{worker.host}:{worker.port}", False),
                 }
                 for worker in self.workers
             ],
-            'replicas': [
+            "replicas": [
                 {
-                    'host': replica.host,
-                    'port': replica.port,
-                    'healthy': self._node_health.get(f"{replica.host}:{replica.port}", False)
+                    "host": replica.host,
+                    "port": replica.port,
+                    "healthy": self._node_health.get(f"{replica.host}:{replica.port}", False),
                 }
                 for replica in self.replicas
             ],
-            'statistics': self._query_stats.copy()
+            "statistics": self._query_stats.copy(),
         }
 
     def get_statistics(self) -> Dict[str, int]:
@@ -536,61 +585,76 @@ def create_pool_from_env() -> DistributedDatabasePool:
         DistributedDatabasePool instance
     """
     # Coordinator node (required)
+    coordinator_password = os.getenv("COORDINATOR_PASSWORD")
+    if not coordinator_password:
+        raise ValueError(
+            "COORDINATOR_PASSWORD environment variable is required. "
+            "Please set it in your .env file or environment."
+        )
+
     coordinator = DatabaseNode(
-        host=os.getenv('COORDINATOR_HOST', 'localhost'),
-        port=int(os.getenv('COORDINATOR_PORT', '5432')),
-        database=os.getenv('COORDINATOR_DB', 'distributed_postgres_cluster'),
-        user=os.getenv('COORDINATOR_USER', 'dpg_cluster'),
-        password=os.getenv('COORDINATOR_PASSWORD', 'dpg_cluster_2026'),
-        role=NodeRole.COORDINATOR
+        host=os.getenv("COORDINATOR_HOST", "localhost"),
+        port=int(os.getenv("COORDINATOR_PORT", "5432")),
+        database=os.getenv("COORDINATOR_DB", "distributed_postgres_cluster"),
+        user=os.getenv("COORDINATOR_USER", "dpg_cluster"),
+        password=coordinator_password,
+        role=NodeRole.COORDINATOR,
     )
 
     # Worker nodes (optional)
     workers = []
-    worker_hosts = os.getenv('WORKER_HOSTS', '').split(',')
+    worker_hosts = os.getenv("WORKER_HOSTS", "").split(",")
     if worker_hosts and worker_hosts[0]:
-        worker_ports = os.getenv('WORKER_PORTS', '').split(',')
-        worker_dbs = os.getenv('WORKER_DBS', '').split(',')
-        worker_users = os.getenv('WORKER_USERS', '').split(',')
-        worker_passwords = os.getenv('WORKER_PASSWORDS', '').split(',')
-        worker_shard_ids = os.getenv('WORKER_SHARD_IDS', '').split(',')
+        worker_ports = os.getenv("WORKER_PORTS", "").split(",")
+        worker_dbs = os.getenv("WORKER_DBS", "").split(",")
+        worker_users = os.getenv("WORKER_USERS", "").split(",")
+        worker_passwords = os.getenv("WORKER_PASSWORDS", "").split(",")
+        worker_shard_ids = os.getenv("WORKER_SHARD_IDS", "").split(",")
 
         for idx, host in enumerate(worker_hosts):
             if host.strip():
-                workers.append(DatabaseNode(
-                    host=host.strip(),
-                    port=int(worker_ports[idx]) if idx < len(worker_ports) else 5432,
-                    database=worker_dbs[idx].strip() if idx < len(worker_dbs) else 'postgres',
-                    user=worker_users[idx].strip() if idx < len(worker_users) else 'postgres',
-                    password=worker_passwords[idx].strip() if idx < len(worker_passwords) else '',
-                    role=NodeRole.WORKER,
-                    shard_id=int(worker_shard_ids[idx]) if idx < len(worker_shard_ids) else idx
-                ))
+                workers.append(
+                    DatabaseNode(
+                        host=host.strip(),
+                        port=int(worker_ports[idx]) if idx < len(worker_ports) else 5432,
+                        database=worker_dbs[idx].strip() if idx < len(worker_dbs) else "postgres",
+                        user=worker_users[idx].strip() if idx < len(worker_users) else "postgres",
+                        password=(
+                            worker_passwords[idx].strip() if idx < len(worker_passwords) else ""
+                        ),
+                        role=NodeRole.WORKER,
+                        shard_id=int(worker_shard_ids[idx]) if idx < len(worker_shard_ids) else idx,
+                    )
+                )
 
     # Replica nodes (optional)
     replicas = []
-    replica_hosts = os.getenv('REPLICA_HOSTS', '').split(',')
+    replica_hosts = os.getenv("REPLICA_HOSTS", "").split(",")
     if replica_hosts and replica_hosts[0]:
-        replica_ports = os.getenv('REPLICA_PORTS', '').split(',')
-        replica_dbs = os.getenv('REPLICA_DBS', '').split(',')
-        replica_users = os.getenv('REPLICA_USERS', '').split(',')
-        replica_passwords = os.getenv('REPLICA_PASSWORDS', '').split(',')
+        replica_ports = os.getenv("REPLICA_PORTS", "").split(",")
+        replica_dbs = os.getenv("REPLICA_DBS", "").split(",")
+        replica_users = os.getenv("REPLICA_USERS", "").split(",")
+        replica_passwords = os.getenv("REPLICA_PASSWORDS", "").split(",")
 
         for idx, host in enumerate(replica_hosts):
             if host.strip():
-                replicas.append(DatabaseNode(
-                    host=host.strip(),
-                    port=int(replica_ports[idx]) if idx < len(replica_ports) else 5432,
-                    database=replica_dbs[idx].strip() if idx < len(replica_dbs) else 'postgres',
-                    user=replica_users[idx].strip() if idx < len(replica_users) else 'postgres',
-                    password=replica_passwords[idx].strip() if idx < len(replica_passwords) else '',
-                    role=NodeRole.REPLICA
-                ))
+                replicas.append(
+                    DatabaseNode(
+                        host=host.strip(),
+                        port=int(replica_ports[idx]) if idx < len(replica_ports) else 5432,
+                        database=replica_dbs[idx].strip() if idx < len(replica_dbs) else "postgres",
+                        user=replica_users[idx].strip() if idx < len(replica_users) else "postgres",
+                        password=(
+                            replica_passwords[idx].strip() if idx < len(replica_passwords) else ""
+                        ),
+                        role=NodeRole.REPLICA,
+                    )
+                )
 
     return DistributedDatabasePool(
         coordinator_node=coordinator,
         worker_nodes=workers if workers else None,
-        replica_nodes=replicas if replicas else None
+        replica_nodes=replicas if replicas else None,
     )
 
 
