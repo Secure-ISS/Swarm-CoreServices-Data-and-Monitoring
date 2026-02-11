@@ -12,5 +12,11 @@ numpy>=1.24.0
 onnxruntime>=1.16.0
 transformers>=4.35.0
 
+# Security (CVE-1, CVE-2 Remediation)
+bcrypt>=4.1.2  # Password hashing (replaces weak SHA-256)
+argon2-cffi>=23.1.0  # Modern memory-hard password hashing
+cryptography>=42.0.0  # Up-to-date crypto library
+validators>=0.22.0  # Input validation
+
 # Utilities
 python-dotenv>=1.0.0

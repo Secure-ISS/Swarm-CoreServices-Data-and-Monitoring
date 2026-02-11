@@ -1,0 +1,20 @@
+# Security Domain Dependencies - CVE-1 Remediation
+
+# Password Hashing (CVE-2 Fix)
+bcrypt>=4.1.2  # Industry-standard password hashing
+argon2-cffi>=23.1.0  # Modern memory-hard password hashing (OWASP recommended)
+
+# Cryptography
+cryptography>=42.0.0  # Up-to-date crypto library
+
+# Input Validation
+validators>=0.22.0  # URL, email, IP validation
+
+# Dependencies already in requirements.txt:
+# psycopg2-binary>=2.9.9
+# asyncpg>=0.29.0
+# anthropic>=0.25.0
+# numpy>=1.24.0
+# onnxruntime>=1.16.0
+# transformers>=4.35.0
+# python-dotenv>=1.0.0

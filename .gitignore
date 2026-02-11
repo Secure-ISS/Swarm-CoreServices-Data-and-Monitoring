@@ -1,55 +1,73 @@
-# Distributed PostgreSQL Cluster - Git Ignore
-
-# === Database & Secrets ===
+# Environment variables (SECURITY: Never commit credentials)
 .env
-.env.*
-*.env
-*.pem
-*.key
-*.crt
-*secret*
-*password*
-*credentials*
+.env.local
+.env.*.local
 
-# Database files
-*.db
-*.sqlite
-*.db-journal
-.swarm/memory.db
-
-# PostgreSQL dumps
-*.sql.gz
-*.dump
-backups/
-
-# === Python ===
+# Python
 __pycache__/
 *.py[cod]
+*$py.class
 *.so
 .Python
-venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing
 .pytest_cache/
 .coverage
+.coverage.*
+htmlcov/
+coverage.json
+.tox/
+.nox/
 
-# === Docker ===
-*.log
-docker-compose.override.yml
-
-# === IDE ===
+# IDEs
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
 .DS_Store
 
-# === Node.js ===
-node_modules/
+# Logs
+*.log
+logs/
 
-# === Temporary ===
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker
+.dockerignore
+
+# Temporary files
 tmp/
+temp/
 *.tmp
 
-# === Keep These ===
-!.gitkeep
-!config/**/*.template
-!scripts/**/*.sh
-!deployment/**/*.yml
+# CI/CD
+.github/workflows/*.local.yml
+
+# Secrets (additional protection)
+secrets/
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+credentials.json
+service-account.json

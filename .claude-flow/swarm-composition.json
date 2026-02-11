@@ -1,0 +1,96 @@
+{
+  "version": "3.0.0",
+  "mode": "dynamic",
+  "hiveId": "hive-1770790719084-7r73u3",
+  "queenId": "queen-1770790719084",
+  "topology": "adaptive",
+  "consensus": "byzantine",
+  "maxAgents": 15,
+  "autoScale": true,
+
+  "workerPools": {
+    "development": {
+      "types": ["coder", "reviewer", "tester", "researcher"],
+      "maxConcurrent": 8,
+      "priority": "high",
+      "triggers": ["feature", "bugfix", "refactor", "research"],
+      "minWorkers": 1,
+      "scaleThreshold": 0.7
+    },
+    "architecture": {
+      "types": ["system-architect", "v3-integration-architect", "v3-security-architect"],
+      "maxConcurrent": 3,
+      "priority": "high",
+      "triggers": ["design", "architecture", "ddd", "domain"],
+      "minWorkers": 1,
+      "scaleThreshold": 0.6
+    },
+    "security": {
+      "types": ["security-auditor", "v3-security-architect", "security-manager"],
+      "maxConcurrent": 4,
+      "priority": "critical",
+      "triggers": ["cve", "security", "vulnerability", "audit"],
+      "minWorkers": 1,
+      "scaleThreshold": 0.5
+    },
+    "performance": {
+      "types": ["perf-analyzer", "performance-engineer", "performance-benchmarker"],
+      "maxConcurrent": 3,
+      "priority": "normal",
+      "triggers": ["optimize", "performance", "benchmark", "profiling"],
+      "minWorkers": 0,
+      "scaleThreshold": 0.8
+    },
+    "coordination": {
+      "types": ["hierarchical-coordinator", "mesh-coordinator", "task-orchestrator"],
+      "maxConcurrent": 2,
+      "priority": "high",
+      "triggers": ["swarm", "coordinate", "orchestrate", "consensus"],
+      "minWorkers": 1,
+      "scaleThreshold": 0.6
+    },
+    "specialized": {
+      "types": ["ml-developer", "backend-dev", "mobile-dev", "api-docs"],
+      "maxConcurrent": 4,
+      "priority": "normal",
+      "triggers": ["ml", "backend", "mobile", "api", "documentation"],
+      "minWorkers": 0,
+      "scaleThreshold": 0.75
+    }
+  },
+
+  "selectionStrategy": {
+    "method": "intelligent-routing",
+    "useHooks": true,
+    "routingEndpoint": "hooks route",
+    "fallbackPool": "development",
+    "multiPoolEnabled": true,
+    "crossPoolCoordination": true
+  },
+
+  "autoDetection": {
+    "enabled": true,
+    "analyzeTaskKeywords": true,
+    "useSemanticSearch": true,
+    "confidenceThreshold": 0.7,
+    "maxPoolsPerTask": 3
+  },
+
+  "scaling": {
+    "rebalanceInterval": 30000,
+    "scaleUpThreshold": 0.8,
+    "scaleDownThreshold": 0.3,
+    "cooldownPeriod": 60000,
+    "minWorkers": 2,
+    "maxWorkers": 15,
+    "preserveSpecialization": true
+  },
+
+  "communication": {
+    "sharedMemory": true,
+    "messageQueue": "redis",
+    "stateSync": "postgresql",
+    "consensusProtocol": "byzantine",
+    "faultTolerance": 0.33
+  }
+}

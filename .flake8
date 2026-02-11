@@ -1,0 +1,56 @@
+# Flake8 configuration for Distributed PostgreSQL Cluster
+# Documentation: https://flake8.pycqa.org/en/latest/user/configuration.html
+
+[flake8]
+# Maximum line length (matches black)
+max-line-length = 100
+
+# Ignore specific errors
+# E203: whitespace before ':' (black compatibility)
+# W503: line break before binary operator (PEP 8 updated)
+# E501: line too long (handled by black)
+# D100-D107: Missing docstrings (too strict for now)
+ignore = E203,W503,E501,D100,D101,D102,D103,D104,D105,D106,D107
+
+# Maximum cyclomatic complexity
+max-complexity = 15
+
+# Exclude directories
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    env,
+    build,
+    dist,
+    .eggs,
+    *.egg-info,
+    .pytest_cache,
+    .mypy_cache,
+    .tox,
+    node_modules,
+    .claude-flow,
+    .swarm
+
+# Files to include
+filename = *.py
+
+# Show source code for each error
+show-source = True
+
+# Show statistics
+statistics = True
+
+# Count errors
+count = True
+
+# Enable color output
+color = always
+
+# Per-file ignores (if needed)
+per-file-ignores =
+    # Allow unused imports in __init__.py files
+    __init__.py:F401,E402
+    # Allow assert statements in tests
+    tests/*:S101

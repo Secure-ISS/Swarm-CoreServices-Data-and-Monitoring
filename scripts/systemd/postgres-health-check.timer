@@ -1,0 +1,23 @@
+[Unit]
+Description=Distributed PostgreSQL Cluster Health Check Timer
+Documentation=https://github.com/yourusername/distributed-postgres-cluster
+Requires=postgres-health-check.service
+
+[Timer]
+# Run 2 minutes after boot
+OnBootSec=2min
+
+# Run every 5 minutes
+OnUnitActiveSec=5min
+
+# Run on calendar schedule (every 5 minutes)
+OnCalendar=*:0/5
+
+# If the system was off, run immediately when it comes back online
+Persistent=true
+
+# Ensure timer stays active
+Unit=postgres-health-check.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,251 @@
+# Pre-commit hooks configuration for Distributed PostgreSQL Cluster
+# Documentation: https://pre-commit.com/
+#
+# Installation:
+#   bash scripts/install-hooks.sh
+#
+# Manual run:
+#   pre-commit run --all-files
+#
+# Skip hook in emergency:
+#   SKIP=hook-name git commit -m "message"
+#   SKIP=black,flake8 git commit -m "message"  # Skip multiple hooks
+#
+# Update hooks:
+#   pre-commit autoupdate
+
+# Minimum pre-commit version required
+minimum_pre_commit_version: '2.20.0'
+
+# Run hooks in parallel for better performance
+default_stages: [commit]
+fail_fast: false  # Run all hooks even if one fails
+
+repos:
+  # ============================================================================
+  # Code Formatting (Auto-fix)
+  # ============================================================================
+
+  # Black - Python code formatter
+  # https://github.com/psf/black
+  - repo: https://github.com/psf/black
+    rev: 24.2.0
+    hooks:
+      - id: black
+        name: black - Python code formatter
+        language_version: python3
+        args:
+          - --line-length=100
+          - --target-version=py311
+        files: '\.py$'
+
+  # isort - Import statement organizer
+  # https://github.com/PyCQA/isort
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        name: isort - Import statement organizer
+        args:
+          - --profile=black
+          - --line-length=100
+          - --multi-line=3
+          - --trailing-comma
+        files: '\.py$'
+
+  # ============================================================================
+  # Code Quality & Linting
+  # ============================================================================
+
+  # Flake8 - Python linter
+  # https://github.com/PyCQA/flake8
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        name: flake8 - Python linter
+        args:
+          - --max-line-length=100
+          - --ignore=E203,W503,E501  # E203: black compat, W503: line break before binary op, E501: line too long
+          - --max-complexity=15
+          - --exclude=.git,__pycache__,.venv,venv,build,dist,.eggs,*.egg-info
+        files: '\.py$'
+        additional_dependencies:
+          - flake8-docstrings
+          - flake8-bugbear
+          - flake8-comprehensions
+          - flake8-simplify
+
+  # Mypy - Static type checker
+  # https://github.com/pre-commit/mirrors-mypy
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        name: mypy - Static type checker
+        args:
+          - --ignore-missing-imports
+          - --show-error-codes
+          - --no-strict-optional
+          - --warn-redundant-casts
+          - --warn-unused-ignores
+        files: '\.py$'
+        additional_dependencies:
+          - types-redis
+          - types-psycopg2
+          - types-PyYAML
+          - types-requests
+
+  # ============================================================================
+  # Security Checks
+  # ============================================================================
+
+  # Bandit - Python security linter
+  # https://github.com/PyCQA/bandit
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.6
+    hooks:
+      - id: bandit
+        name: bandit - Python security linter
+        args:
+          - --recursive
+          - --skip=B101,B601  # B101: assert_used, B601: paramiko (not used)
+          - --exclude=tests/*,examples/*
+        files: '\.py$'
+
+  # Detect hardcoded secrets
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        name: detect-secrets - Prevent secret leaks
+        args:
+          - --baseline=.secrets.baseline
+          - --exclude-files=.*\.env\.example$
+          - --exclude-files=.*\.md$
+          - --exclude-files=.*/vectors\.db$
+        exclude: package.lock.json
+
+  # Custom hook to prevent .env files from being committed
+  - repo: local
+    hooks:
+      - id: prevent-env-files
+        name: prevent-env-files - Block .env commits
+        entry: bash -c 'git diff --cached --name-only | grep -E "\.env$" && echo "ERROR: .env file detected! Use .env.example instead." && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
+
+      # Check for SQL injection patterns
+      - id: check-sql-injection
+        name: check-sql-injection - Detect unsafe SQL patterns
+        entry: bash -c 'grep -rn --include="*.py" -E "(execute\(.*\%|execute\(.*\+|execute\(.*f\"|cursor\.execute\(f\")" src/ tests/ && echo "ERROR: Potential SQL injection detected! Use parameterized queries." && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
+
+  # ============================================================================
+  # Testing
+  # ============================================================================
+
+  # Pytest - Run quick tests
+  - repo: local
+    hooks:
+      - id: pytest-quick
+        name: pytest-quick - Run fast unit tests
+        entry: pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+        args:
+          - tests/unit
+          - -x  # Stop on first failure
+          - --tb=short  # Short traceback format
+          - --duration=10  # Show 10 slowest tests
+          - -m "not slow"  # Skip slow tests
+        files: '\.py$'
+
+  # ============================================================================
+  # File Checks (Built-in pre-commit hooks)
+  # ============================================================================
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      # Whitespace checks
+      - id: trailing-whitespace
+        name: trailing-whitespace - Remove trailing whitespace
+        args: [--markdown-linebreak-ext=md]
+
+      - id: end-of-file-fixer
+        name: end-of-file-fixer - Ensure files end with newline
+
+      - id: mixed-line-ending
+        name: mixed-line-ending - Fix mixed line endings
+        args: [--fix=lf]
+
+      # File format checks
+      - id: check-yaml
+        name: check-yaml - Validate YAML syntax
+        args: [--allow-multiple-documents]
+
+      - id: check-json
+        name: check-json - Validate JSON syntax
+
+      - id: check-toml
+        name: check-toml - Validate TOML syntax
+
+      # Git checks
+      - id: check-merge-conflict
+        name: check-merge-conflict - Detect merge conflict markers
+
+      - id: check-added-large-files
+        name: check-added-large-files - Prevent large files (>500KB)
+        args: [--maxkb=500]
+        exclude: 'vectors\.db$'
+
+      # Python-specific checks
+      - id: check-ast
+        name: check-ast - Validate Python AST
+        files: '\.py$'
+
+      - id: check-docstring-first
+        name: check-docstring-first - Ensure docstrings come first
+        files: '\.py$'
+
+      - id: debug-statements
+        name: debug-statements - Detect debug statements (pdb, ipdb)
+        files: '\.py$'
+
+      - id: name-tests-test
+        name: name-tests-test - Ensure test files are named correctly
+        args: [--pytest-test-first]
+        files: tests/.*\.py$
+
+  # ============================================================================
+  # Documentation
+  # ============================================================================
+
+  # Check for broken markdown links
+  - repo: https://github.com/tcort/markdown-link-check
+    rev: v3.11.2
+    hooks:
+      - id: markdown-link-check
+        name: markdown-link-check - Validate markdown links
+        args:
+          - --quiet
+          - --config=.markdown-link-check.json
+        files: '\.md$'
+
+# ============================================================================
+# CI Configuration (optional, for GitHub Actions)
+# ============================================================================
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: [pytest-quick]  # Skip pytest in CI (run separately)
+  submodules: false
