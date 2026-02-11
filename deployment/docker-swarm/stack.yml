@@ -34,6 +34,8 @@ secrets:
     external: true
   pgbouncer_auth:
     external: true
+  mcp_password:
+    external: true
 
 configs:
   coordinator_config:
@@ -514,3 +516,75 @@ services:
       timeout: 10s
       retries: 2
       start_period: 60s
+
+  # ==============================================
+  # POSTGRES MCP SERVER (Cluster Management)
+  # ==============================================
+  postgres-mcp:
+    build:
+      context: ../../mcp-server
+      dockerfile: Dockerfile
+    hostname: postgres-mcp
+    networks:
+      - postgres_mesh
+    ports:
+      - target: 3000
+        published: 3000
+        protocol: tcp
+        mode: ingress
+    secrets:
+      - source: mcp_password
+        target: mcp_password
+      - source: postgres_password
+        target: postgres_password
+    environment:
+      # Connect through coordinator for cluster-wide queries
+      POSTGRES_URL: "postgresql://mcp_user@pg-coordinator:5432/distributed_postgres_cluster"
+      POSTGRES_PASSWORD_FILE: /run/secrets/mcp_password
+      # Admin connection for cluster management operations
+      POSTGRES_ADMIN_URL: "postgresql://dpg_cluster@pg-coordinator:5432/distributed_postgres_cluster"
+      POSTGRES_ADMIN_PASSWORD_FILE: /run/secrets/postgres_password
+      # MCP server configuration
+      MCP_TRANSPORT: sse
+      MCP_PORT: 3000
+      MCP_HOST: 0.0.0.0
+      # Enable Citus extensions
+      ENABLE_CITUS_TOOLS: "true"
+      # Read-only mode (set to false for cluster management)
+      MCP_READ_ONLY: "false"
+      # Logging
+      LOG_LEVEL: INFO
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      labels:
+        - "com.distributed-postgres.role=mcp-server"
+        - "com.distributed-postgres.cluster=main"
+        - "traefik.enable=true"
+        - "traefik.http.routers.postgres-mcp.rule=Host(`mcp.postgres.local`)"
+        - "traefik.http.services.postgres-mcp.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
