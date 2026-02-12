@@ -305,6 +305,9 @@ networks:
   dpg-monitoring:
     driver: bridge
     name: dpg-monitoring-network
+    ipam:
+      config:
+        - subnet: 10.198.22.0/26
   dpg-dev-net:
     external: true
     name: dpg-dev-network

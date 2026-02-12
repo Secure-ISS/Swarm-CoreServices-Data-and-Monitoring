@@ -1,0 +1,64 @@
+# Traefik Static Configuration - Unified Stack
+# Main load balancer replacing HAProxy
+
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+# API and Dashboard
+api:
+  dashboard: true
+  insecure: true
+
+# Entry Points
+entryPoints:
+  # PostgreSQL Patroni Primary (read-write)
+  postgres-primary:
+    address: ":5432"
+
+  # PostgreSQL Patroni Replicas (read-only)
+  postgres-replicas:
+    address: ":5433"
+
+  # Citus Distributed Coordinator
+  citus:
+    address: ":5440"
+
+  # Traefik dashboard
+  traefik:
+    address: ":8080"
+
+  # Ping endpoint
+  ping:
+    address: ":8082"
+
+# Providers
+providers:
+  # Docker provider (auto-discovery via labels)
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: dpg-unified-network
+    watch: true
+
+# Logging
+log:
+  level: INFO
+  format: json
+
+# Access Logs
+accessLog:
+  format: json
+  bufferingSize: 100
+
+# Metrics (Prometheus)
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addRoutersLabels: true
+    addServicesLabels: true
+    entryPoint: traefik
+
+# Health Check
+ping:
+  entryPoint: ping

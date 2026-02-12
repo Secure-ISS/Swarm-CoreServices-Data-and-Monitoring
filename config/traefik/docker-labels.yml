@@ -1,0 +1,53 @@
+# Alternative: Docker Labels for Traefik Auto-Discovery
+# Add these labels to docker-compose.yml for automatic Traefik integration
+
+version: '3.9'
+
+services:
+  patroni-1:
+    labels:
+      # Enable Traefik
+      - "traefik.enable=true"
+
+      # TCP Router for PostgreSQL
+      - "traefik.tcp.routers.postgres.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.postgres.entrypoints=postgres"
+      - "traefik.tcp.routers.postgres.tls.passthrough=true"
+
+      # Service configuration
+      - "traefik.tcp.services.postgres.loadbalancer.server.port=5432"
+      - "traefik.tcp.services.postgres.loadbalancer.healthcheck.interval=10s"
+      - "traefik.tcp.services.postgres.loadbalancer.healthcheck.timeout=3s"
+
+      # Patroni REST API for health checks
+      - "traefik.http.routers.patroni-api.rule=Host(`patroni-1.local`)"
+      - "traefik.http.routers.patroni-api.entrypoints=web"
+      - "traefik.http.services.patroni-api.loadbalancer.server.port=8008"
+
+  patroni-2:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.postgres.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.postgres.entrypoints=postgres"
+      - "traefik.tcp.routers.postgres.tls.passthrough=true"
+      - "traefik.tcp.services.postgres.loadbalancer.server.port=5432"
+      - "traefik.tcp.services.postgres.loadbalancer.healthcheck.interval=10s"
+      - "traefik.http.routers.patroni-api.rule=Host(`patroni-2.local`)"
+      - "traefik.http.services.patroni-api.loadbalancer.server.port=8008"
+
+  patroni-3:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.postgres.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.postgres.entrypoints=postgres"
+      - "traefik.tcp.routers.postgres.tls.passthrough=true"
+      - "traefik.tcp.services.postgres.loadbalancer.server.port=5432"
+      - "traefik.tcp.services.postgres.loadbalancer.healthcheck.interval=10s"
+      - "traefik.http.routers.patroni-api.rule=Host(`patroni-3.local`)"
+      - "traefik.http.services.patroni-api.loadbalancer.server.port=8008"
+
+# Network configuration - connect to Traefik network
+networks:
+  default:
+    external: true
+    name: traefik-network  # Replace with your Traefik network name

@@ -1,0 +1,82 @@
+# Traefik Static Configuration
+# Replaces HAProxy for production-like load balancing
+
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+# API and Dashboard
+api:
+  dashboard: true
+  insecure: true  # For development - disable in production
+
+# Entry Points (ports Traefik listens on)
+entryPoints:
+  # PostgreSQL Patroni Primary (read-write)
+  postgres:
+    address: ":5432"
+    transport:
+      respondingTimeouts:
+        readTimeout: 30s
+        writeTimeout: 30s
+
+  # PostgreSQL Patroni Replicas (read-only)
+  postgres-ro:
+    address: ":5433"
+    transport:
+      respondingTimeouts:
+        readTimeout: 30s
+        writeTimeout: 30s
+
+  # Citus Distributed Coordinator
+  citus:
+    address: ":5440"
+    transport:
+      respondingTimeouts:
+        readTimeout: 30s
+        writeTimeout: 30s
+
+  # Traefik dashboard
+  traefik:
+    address: ":8080"
+
+  # Traefik API
+  api:
+    address: ":8081"
+
+# Providers (where Traefik gets routing config)
+providers:
+  # File provider for PostgreSQL TCP routing
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+  # Docker provider (optional - for auto-discovery)
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: dpg-unified-network
+
+# Logging
+log:
+  level: INFO
+  filePath: /var/log/traefik/traefik.log
+  format: json
+
+# Access Logs
+accessLog:
+  filePath: /var/log/traefik/access.log
+  format: json
+  bufferingSize: 100
+
+# Metrics (Prometheus)
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addRoutersLabels: true
+    addServicesLabels: true
+    entryPoint: api
+
+# Health Check
+ping:
+  entryPoint: api

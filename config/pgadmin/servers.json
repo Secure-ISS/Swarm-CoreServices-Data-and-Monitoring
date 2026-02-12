@@ -1,0 +1,84 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Patroni Primary (HA)",
+      "Group": "High Availability",
+      "Host": "dpg-patroni-primary",
+      "Port": 5432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "Patroni primary node - read/write"
+    },
+    "2": {
+      "Name": "Patroni Replica 1 (HA)",
+      "Group": "High Availability",
+      "Host": "dpg-patroni-replica-1",
+      "Port": 5432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "Patroni replica 1 - read-only"
+    },
+    "3": {
+      "Name": "Patroni Replica 2 (HA)",
+      "Group": "High Availability",
+      "Host": "dpg-patroni-replica-2",
+      "Port": 5432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "Patroni replica 2 - read-only"
+    },
+    "4": {
+      "Name": "Citus Coordinator",
+      "Group": "Distributed Cluster",
+      "Host": "dpg-citus-coordinator",
+      "Port": 5432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "Citus coordinator - distributed queries"
+    },
+    "5": {
+      "Name": "Citus Worker 1",
+      "Group": "Distributed Cluster",
+      "Host": "dpg-citus-worker-1",
+      "Port": 5432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "Citus worker 1 - shard storage"
+    },
+    "6": {
+      "Name": "Citus Worker 2",
+      "Group": "Distributed Cluster",
+      "Host": "dpg-citus-worker-2",
+      "Port": 5432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "Citus worker 2 - shard storage"
+    },
+    "7": {
+      "Name": "RuVector Dev DB",
+      "Group": "Development",
+      "Host": "ruvector-db",
+      "Port": 5432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "Original RuVector development database"
+    },
+    "8": {
+      "Name": "PgBouncer Pool",
+      "Group": "Connection Pooling",
+      "Host": "dpg-pgbouncer",
+      "Port": 6432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "PgBouncer connection pooler"
+    }
+  }
+}

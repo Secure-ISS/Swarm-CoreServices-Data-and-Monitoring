@@ -1,0 +1,643 @@
+version: '3.9'
+
+# Unified Distributed PostgreSQL Cluster Stack
+# All services on single network with Traefik as main load balancer
+# Replaces fragmented docker-compose files
+
+networks:
+  dpg-unified:
+    name: dpg-unified-network
+    external: true
+
+volumes:
+  # Patroni HA Cluster
+  dpg-patroni-primary-data:
+  dpg-patroni-replica-1-data:
+  dpg-patroni-replica-2-data:
+
+  # etcd Consensus
+  dpg-etcd-1-data:
+  dpg-etcd-2-data:
+  dpg-etcd-3-data:
+
+  # Citus Distributed Cluster
+  dpg-citus-coordinator-data:
+  dpg-citus-worker-1-data:
+  dpg-citus-worker-2-data:
+  dpg-citus-redis-data:
+
+  # Monitoring
+  dpg-prometheus-data:
+  dpg-grafana-data:
+  dpg-alertmanager-data:
+
+  # Connection Pooling
+  dpg-redis-cache-data:
+
+  # Database Management
+  dpg-pgadmin-data:
+
+services:
+  # ============================================================
+  # Traefik Load Balancer (Replaces HAProxy)
+  # ============================================================
+  dpg-traefik-lb:
+    image: traefik:v2.11
+    container_name: dpg-traefik-lb
+    hostname: traefik
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.10
+
+    ports:
+      # PostgreSQL Patroni Primary (read-write)
+      - "5500:5432"
+      # PostgreSQL Patroni Replicas (read-only)
+      - "5501:5433"
+      # Citus Distributed Coordinator
+      - "5502:5440"
+      # Traefik Dashboard
+      - "8080:8080"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/traefik/traefik-unified.yml:/etc/traefik/traefik.yml:ro
+      - ./config/traefik/dynamic:/etc/traefik/dynamic:ro
+
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+    restart: unless-stopped
+
+    labels:
+      - "com.docker.project=distributed-postgres-cluster"
+
+  # ============================================================
+  # etcd Consensus Cluster (3 nodes)
+  # ============================================================
+  dpg-etcd-1:
+    image: quay.io/coreos/etcd:v3.5.11
+    container_name: dpg-etcd-1
+    hostname: etcd-1
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.20
+
+    environment:
+      - ETCD_NAME=etcd-1
+      - ETCD_INITIAL_CLUSTER=etcd-1=http://172.25.0.20:2380,etcd-2=http://172.25.0.21:2380,etcd-3=http://172.25.0.22:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_INITIAL_CLUSTER_TOKEN=dpg-etcd-cluster
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://172.25.0.20:2380
+      - ETCD_ADVERTISE_CLIENT_URLS=http://172.25.0.20:2379
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+
+    volumes:
+      - dpg-etcd-1-data:/etcd-data
+
+    restart: unless-stopped
+
+  dpg-etcd-2:
+    image: quay.io/coreos/etcd:v3.5.11
+    container_name: dpg-etcd-2
+    hostname: etcd-2
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.21
+
+    environment:
+      - ETCD_NAME=etcd-2
+      - ETCD_INITIAL_CLUSTER=etcd-1=http://172.25.0.20:2380,etcd-2=http://172.25.0.21:2380,etcd-3=http://172.25.0.22:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_INITIAL_CLUSTER_TOKEN=dpg-etcd-cluster
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://172.25.0.21:2380
+      - ETCD_ADVERTISE_CLIENT_URLS=http://172.25.0.21:2379
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+
+    volumes:
+      - dpg-etcd-2-data:/etcd-data
+
+    restart: unless-stopped
+
+  dpg-etcd-3:
+    image: quay.io/coreos/etcd:v3.5.11
+    container_name: dpg-etcd-3
+    hostname: etcd-3
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.22
+
+    environment:
+      - ETCD_NAME=etcd-3
+      - ETCD_INITIAL_CLUSTER=etcd-1=http://172.25.0.20:2380,etcd-2=http://172.25.0.21:2380,etcd-3=http://172.25.0.22:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_INITIAL_CLUSTER_TOKEN=dpg-etcd-cluster
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://172.25.0.22:2380
+      - ETCD_ADVERTISE_CLIENT_URLS=http://172.25.0.22:2379
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+
+    volumes:
+      - dpg-etcd-3-data:/etcd-data
+
+    restart: unless-stopped
+
+  # ============================================================
+  # Patroni HA Cluster (3 nodes)
+  # ============================================================
+  dpg-patroni-primary:
+    build:
+      context: ./docker/patroni
+      dockerfile: Dockerfile
+    container_name: dpg-patroni-primary
+    hostname: patroni-1
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.30
+
+    ports:
+      - "5433:5432"
+      - "8008:8008"
+
+    environment:
+      - PATRONI_NAME=patroni-1
+      - PATRONI_SCOPE=patroni-cluster
+      - PATRONI_ETCD3_HOSTS=172.25.0.20:2379,172.25.0.21:2379,172.25.0.22:2379
+      - PATRONI_RESTAPI_LISTEN=0.0.0.0:8008
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=172.25.0.30:5432
+      - PATRONI_RESTAPI_CONNECT_ADDRESS=172.25.0.30:8008
+      - POSTGRES_USER=dpg_cluster
+      - POSTGRES_PASSWORD=dpg_cluster_2026
+      - POSTGRES_DB=distributed_postgres_cluster
+
+    volumes:
+      - dpg-patroni-primary-data:/var/lib/postgresql/data
+      - ./config/patroni/patroni.yml:/etc/patroni/patroni.yml:ro
+
+    depends_on:
+      - dpg-etcd-1
+      - dpg-etcd-2
+      - dpg-etcd-3
+
+    restart: unless-stopped
+
+  dpg-patroni-replica-1:
+    build:
+      context: ./docker/patroni
+      dockerfile: Dockerfile
+    container_name: dpg-patroni-replica-1
+    hostname: patroni-2
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.31
+
+    ports:
+      - "5434:5432"
+      - "8009:8008"
+
+    environment:
+      - PATRONI_NAME=patroni-2
+      - PATRONI_SCOPE=patroni-cluster
+      - PATRONI_ETCD3_HOSTS=172.25.0.20:2379,172.25.0.21:2379,172.25.0.22:2379
+      - PATRONI_RESTAPI_LISTEN=0.0.0.0:8008
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=172.25.0.31:5432
+      - PATRONI_RESTAPI_CONNECT_ADDRESS=172.25.0.31:8008
+      - POSTGRES_USER=dpg_cluster
+      - POSTGRES_PASSWORD=dpg_cluster_2026
+      - POSTGRES_DB=distributed_postgres_cluster
+
+    volumes:
+      - dpg-patroni-replica-1-data:/var/lib/postgresql/data
+      - ./config/patroni/patroni.yml:/etc/patroni/patroni.yml:ro
+
+    depends_on:
+      - dpg-etcd-1
+      - dpg-etcd-2
+      - dpg-etcd-3
+
+    restart: unless-stopped
+
+  dpg-patroni-replica-2:
+    build:
+      context: ./docker/patroni
+      dockerfile: Dockerfile
+    container_name: dpg-patroni-replica-2
+    hostname: patroni-3
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.32
+
+    ports:
+      - "5435:5432"
+      - "8010:8008"
+
+    environment:
+      - PATRONI_NAME=patroni-3
+      - PATRONI_SCOPE=patroni-cluster
+      - PATRONI_ETCD3_HOSTS=172.25.0.20:2379,172.25.0.21:2379,172.25.0.22:2379
+      - PATRONI_RESTAPI_LISTEN=0.0.0.0:8008
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=172.25.0.32:5432
+      - PATRONI_RESTAPI_CONNECT_ADDRESS=172.25.0.32:8008
+      - POSTGRES_USER=dpg_cluster
+      - POSTGRES_PASSWORD=dpg_cluster_2026
+      - POSTGRES_DB=distributed_postgres_cluster
+
+    volumes:
+      - dpg-patroni-replica-2-data:/var/lib/postgresql/data
+      - ./config/patroni/patroni.yml:/etc/patroni/patroni.yml:ro
+
+    depends_on:
+      - dpg-etcd-1
+      - dpg-etcd-2
+      - dpg-etcd-3
+
+    restart: unless-stopped
+
+  # ============================================================
+  # Citus Distributed Cluster (1 coordinator + 2 workers)
+  # ============================================================
+  dpg-citus-coordinator:
+    image: citusdata/citus:12.1
+    container_name: dpg-citus-coordinator
+    hostname: citus-coordinator
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.40
+
+    ports:
+      - "5440:5432"
+
+    environment:
+      - POSTGRES_USER=dpg_cluster
+      - POSTGRES_PASSWORD=dpg_cluster_2026
+      - POSTGRES_DB=distributed_postgres_cluster
+      - PGDATA=/var/lib/postgresql/data
+
+    volumes:
+      - dpg-citus-coordinator-data:/var/lib/postgresql/data
+
+    command: >
+      postgres
+      -c shared_preload_libraries='citus'
+      -c shared_buffers=512MB
+      -c effective_cache_size=1536MB
+      -c work_mem=32MB
+      -c max_connections=100
+      -c listen_addresses='*'
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dpg_cluster -d distributed_postgres_cluster"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    restart: unless-stopped
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.citus.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.citus.entrypoints=citus"
+      - "traefik.tcp.services.citus.loadbalancer.server.port=5432"
+
+  dpg-citus-worker-1:
+    image: citusdata/citus:12.1
+    container_name: dpg-citus-worker-1
+    hostname: citus-worker-1
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.41
+
+    ports:
+      - "5441:5432"
+
+    environment:
+      - POSTGRES_USER=dpg_cluster
+      - POSTGRES_PASSWORD=dpg_cluster_2026
+      - POSTGRES_DB=distributed_postgres_cluster
+      - PGDATA=/var/lib/postgresql/data
+
+    volumes:
+      - dpg-citus-worker-1-data:/var/lib/postgresql/data
+
+    command: >
+      postgres
+      -c shared_preload_libraries='citus'
+      -c shared_buffers=1GB
+      -c effective_cache_size=3GB
+      -c work_mem=64MB
+      -c max_connections=200
+      -c listen_addresses='*'
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dpg_cluster"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    restart: unless-stopped
+
+  dpg-citus-worker-2:
+    image: citusdata/citus:12.1
+    container_name: dpg-citus-worker-2
+    hostname: citus-worker-2
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.42
+
+    ports:
+      - "5442:5432"
+
+    environment:
+      - POSTGRES_USER=dpg_cluster
+      - POSTGRES_PASSWORD=dpg_cluster_2026
+      - POSTGRES_DB=distributed_postgres_cluster
+      - PGDATA=/var/lib/postgresql/data
+
+    volumes:
+      - dpg-citus-worker-2-data:/var/lib/postgresql/data
+
+    command: >
+      postgres
+      -c shared_preload_libraries='citus'
+      -c shared_buffers=1GB
+      -c effective_cache_size=3GB
+      -c work_mem=64MB
+      -c max_connections=200
+      -c listen_addresses='*'
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dpg_cluster"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    restart: unless-stopped
+
+  # ============================================================
+  # Redis Cache (for Citus distributed queries)
+  # ============================================================
+  dpg-redis-cache:
+    image: redis:7-alpine
+    container_name: dpg-redis-cache
+    hostname: redis-cache
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.50
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - dpg-redis-cache-data:/data
+
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+    restart: unless-stopped
+
+  # ============================================================
+  # PgBouncer Connection Pooler
+  # ============================================================
+  dpg-pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: dpg-pgbouncer
+    hostname: pgbouncer
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.60
+
+    ports:
+      - "6432:6432"
+
+    environment:
+      - DATABASE_URL=postgres://dpg_cluster:dpg_cluster_2026@traefik:5432/distributed_postgres_cluster
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=200
+      - DEFAULT_POOL_SIZE=40
+
+    depends_on:
+      - dpg-traefik-lb
+      - dpg-patroni-primary
+
+    restart: unless-stopped
+
+  # ============================================================
+  # Monitoring Stack
+  # ============================================================
+  dpg-prometheus:
+    image: prom/prometheus:v2.48.1
+    container_name: dpg-prometheus
+    hostname: prometheus
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.70
+
+    ports:
+      - "9090:9090"
+
+    volumes:
+      - dpg-prometheus-data:/prometheus
+      - ./config/prometheus/prometheus-unified.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/alerts:/etc/prometheus/alerts:ro
+
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+
+    restart: unless-stopped
+
+  dpg-grafana:
+    image: grafana/grafana:10.2.3
+    container_name: dpg-grafana
+    hostname: grafana
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.71
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+    volumes:
+      - dpg-grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+    depends_on:
+      - dpg-prometheus
+
+    restart: unless-stopped
+
+  dpg-alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: dpg-alertmanager
+    hostname: alertmanager
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.72
+
+    ports:
+      - "9093:9093"
+
+    volumes:
+      - dpg-alertmanager-data:/alertmanager
+      - ./config/alertmanager/config.yml:/etc/alertmanager/config.yml:ro
+
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+
+    restart: unless-stopped
+
+  # ============================================================
+  # Exporters
+  # ============================================================
+  dpg-postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: dpg-postgres-exporter
+    hostname: postgres-exporter
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.80
+
+    ports:
+      - "9187:9187"
+
+    environment:
+      - DATA_SOURCE_NAME=postgresql://dpg_cluster:dpg_cluster_2026@traefik:5432/distributed_postgres_cluster?sslmode=disable
+
+    depends_on:
+      - dpg-traefik-lb
+
+    restart: unless-stopped
+
+  dpg-redis-exporter:
+    image: oliver006/redis_exporter:v1.55.0-alpine
+    container_name: dpg-redis-exporter
+    hostname: redis-exporter
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.81
+
+    ports:
+      - "9121:9121"
+
+    environment:
+      - REDIS_ADDR=redis://dpg-redis-cache:6379
+
+    depends_on:
+      - dpg-redis-cache
+
+    restart: unless-stopped
+
+  # ============================================================
+  # PGAdmin - Database Management UI
+  # ============================================================
+  dpg-pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: dpg-pgadmin
+    hostname: pgadmin
+
+    networks:
+      dpg-unified:
+        ipv4_address: 172.25.0.90
+
+    ports:
+      - "5050:80"
+
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@admin.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+
+    volumes:
+      - dpg-pgadmin-data:/var/lib/pgadmin
+      - ./config/pgadmin/servers.json:/pgadmin4/servers.json:ro
+
+    depends_on:
+      - dpg-patroni-primary
+      - dpg-citus-coordinator
+
+    restart: unless-stopped
+
+  # dpg-node-exporter:
+  #   image: prom/node-exporter:v1.7.0
+  #   container_name: dpg-node-exporter
+  #   hostname: node-exporter
+  #
+  #   networks:
+  #     dpg-unified:
+  #       ipv4_address: 172.25.0.82
+  #
+  #   ports:
+  #     - "9100:9100"
+  #
+  #   command:
+  #     - '--path.rootfs=/host'
+  #
+  #   volumes:
+  #     - /:/host:ro,rslave
+  #
+  #   restart: unless-stopped
+  #   # NOTE: Disabled due to WSL2 compatibility issues with root filesystem mount
+
+# Usage:
+# Start:    docker-compose -f docker-compose.unified.yml up -d
+# Stop:     docker-compose -f docker-compose.unified.yml down
+# Logs:     docker-compose -f docker-compose.unified.yml logs -f [service]
+# Restart:  docker-compose -f docker-compose.unified.yml restart [service]
+# Clean:    docker-compose -f docker-compose.unified.yml down -v
+#
+# Connection Endpoints:
+#   Traefik → Patroni Primary:  localhost:5500
+#   Traefik → Patroni Replicas: localhost:5501
+#   Traefik → Citus:            localhost:5502
+#   PgBouncer:                   localhost:6432
+#   Prometheus:                  localhost:9090
+#   Grafana:                     localhost:3000
+#   Traefik Dashboard:           localhost:8080

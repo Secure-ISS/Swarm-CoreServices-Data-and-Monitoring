@@ -1,0 +1,80 @@
+# Traefik Dynamic Configuration - PostgreSQL TCP Routing
+# Auto-reloaded when file changes
+
+tcp:
+  routers:
+    # ============================================================
+    # Patroni HA Cluster - Primary (Read-Write)
+    # ============================================================
+    patroni-primary:
+      rule: "HostSNI(`*`)"
+      entryPoints:
+        - postgres
+      service: patroni-primary
+      # No TLS termination - passthrough to PostgreSQL
+
+    # ============================================================
+    # Patroni HA Cluster - Replicas (Read-Only)
+    # ============================================================
+    patroni-replicas:
+      rule: "HostSNI(`*`)"
+      entryPoints:
+        - postgres-ro
+      service: patroni-replicas
+
+    # ============================================================
+    # Citus Distributed Cluster - Coordinator
+    # ============================================================
+    citus-coordinator:
+      rule: "HostSNI(`*`)"
+      entryPoints:
+        - citus
+      service: citus-cluster
+
+  services:
+    # ============================================================
+    # Patroni Primary Service (HAProxy routes to current leader)
+    # ============================================================
+    patroni-primary:
+      loadBalancer:
+        servers:
+          # Route through HAProxy which knows current leader
+          - address: "haproxy:5000"
+
+        # Health check
+        healthCheck:
+          interval: "10s"
+          timeout: "3s"
+
+    # ============================================================
+    # Patroni Replicas Service (All replicas for read scaling)
+    # ============================================================
+    patroni-replicas:
+      loadBalancer:
+        servers:
+          - address: "patroni-1:5432"
+          - address: "patroni-3:5432"
+          # patroni-2 is usually leader, exclude from read pool
+
+        healthCheck:
+          interval: "10s"
+          timeout: "3s"
+
+    # ============================================================
+    # Citus Cluster Service (Coordinator handles distribution)
+    # ============================================================
+    citus-cluster:
+      loadBalancer:
+        servers:
+          - address: "citus-coordinator:5432"
+
+        healthCheck:
+          interval: "10s"
+          timeout: "3s"
+
+# Notes:
+# - All routing is TCP (Layer 4), not HTTP
+# - No TLS termination - PostgreSQL handles SSL/TLS directly
+# - Health checks verify port is accepting connections
+# - HAProxy manages Patroni leader detection
+# - Citus coordinator handles query routing to workers

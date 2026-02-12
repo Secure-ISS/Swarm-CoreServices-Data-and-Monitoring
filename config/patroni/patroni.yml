@@ -131,7 +131,7 @@ postgresql:
   data_dir: /var/lib/postgresql/data
 
   # Binary locations
-  bin_dir: /usr/lib/postgresql/16/bin
+  bin_dir: /usr/lib/postgresql/17/bin
 
   # Connection settings
   listen: 0.0.0.0:5432

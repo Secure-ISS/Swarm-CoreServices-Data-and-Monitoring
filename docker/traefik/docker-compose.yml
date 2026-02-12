@@ -1,0 +1,77 @@
+version: '3.9'
+
+# Standalone Traefik Load Balancer
+# Replaces HAProxy to match production environment
+# Connects to unified network to route to all database clusters
+
+networks:
+  dpg-unified-network:
+    external: true
+    name: dpg-unified-network
+
+services:
+  traefik:
+    image: traefik:v2.11
+    container_name: dpg-traefik
+    hostname: traefik
+
+    networks:
+      dpg-unified-network:
+        ipv4_address: 172.25.0.100
+
+    ports:
+      # PostgreSQL primary (read-write via Patroni)
+      - "5500:5432"
+
+      # PostgreSQL read replicas
+      - "5501:5433"
+
+      # Citus distributed coordinator
+      - "5502:5440"
+
+      # Traefik dashboard
+      - "8080:8080"
+
+      # Traefik API
+      - "8081:8081"
+
+    volumes:
+      # Traefik static configuration
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+
+      # Dynamic configuration (PostgreSQL TCP routers)
+      - ./dynamic:/etc/traefik/dynamic:ro
+
+      # Logs
+      - ./logs:/var/log/traefik
+
+    environment:
+      - TZ=UTC
+
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    restart: unless-stopped
+
+    labels:
+      - "com.docker.description=Traefik reverse proxy for PostgreSQL clusters"
+      - "com.docker.project=distributed-postgres-cluster"
+
+# Usage:
+# Start:    docker-compose -f docker/traefik/docker-compose.yml up -d
+# Stop:     docker-compose -f docker/traefik/docker-compose.yml down
+# Logs:     docker-compose -f docker/traefik/docker-compose.yml logs -f
+# Status:   docker-compose -f docker/traefik/docker-compose.yml ps
+#
+# Endpoints:
+#   - Patroni HA:         localhost:5500 (primary read-write)
+#   - Patroni Replicas:   localhost:5501 (read-only)
+#   - Citus Distributed:  localhost:5502 (coordinator)
+#   - Traefik Dashboard:  http://localhost:8080

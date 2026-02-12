@@ -82,6 +82,7 @@ postgresql:
   listen: ${PATRONI_POSTGRESQL_LISTEN}
   connect_address: ${PATRONI_POSTGRESQL_CONNECT_ADDRESS}
   data_dir: ${PATRONI_POSTGRESQL_DATA_DIR}
+  bin_dir: /usr/lib/postgresql/17/bin
   pgpass: /tmp/pgpass
   authentication:
     replication:

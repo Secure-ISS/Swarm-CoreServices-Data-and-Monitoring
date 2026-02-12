@@ -1,0 +1,59 @@
+# Traefik TCP Router Configuration for PostgreSQL Cluster
+# Deploy this to production Traefik instance
+#
+# Usage:
+#   1. Copy to Traefik's dynamic configuration directory
+#   2. Restart Traefik or wait for auto-reload
+#   3. Connect via traefik-host:5432
+
+tcp:
+  routers:
+    # Primary PostgreSQL endpoint (read-write)
+    postgres-primary:
+      rule: "HostSNI(`*`)"
+      entryPoints:
+        - postgres
+      service: postgres-cluster
+      tls:
+        passthrough: true  # Let PostgreSQL handle SSL/TLS
+
+    # Read-only endpoint (load balanced across replicas)
+    postgres-readonly:
+      rule: "HostSNI(`*`)"
+      entryPoints:
+        - postgres-ro
+      service: postgres-replicas
+      tls:
+        passthrough: true
+
+  services:
+    # All Patroni nodes - Patroni will route to current leader
+    postgres-cluster:
+      loadBalancer:
+        servers:
+          - address: "patroni-1:5432"
+          - address: "patroni-2:5432"
+          - address: "patroni-3:5432"
+        # Health check via Patroni REST API
+        healthCheck:
+          interval: "10s"
+          timeout: "3s"
+
+    # Read replicas only (for read scaling)
+    postgres-replicas:
+      loadBalancer:
+        servers:
+          - address: "patroni-1:5432"
+          - address: "patroni-3:5432"
+        healthCheck:
+          interval: "10s"
+          timeout: "3s"
+
+# Traefik static configuration (traefik.yml)
+# Add these entryPoints if not already present:
+#
+# entryPoints:
+#   postgres:
+#     address: ":5432"
+#   postgres-ro:
+#     address: ":5433"

@@ -32,7 +32,7 @@ services:
   # Citus Coordinator Node (with RuVector extension)
   # ============================================================
   citus-coordinator:
-    image: ruvnet/ruvector-postgres:latest
+    image: citusdata/citus:12.1
     container_name: citus-coordinator
     hostname: citus-coordinator
     networks:
@@ -64,15 +64,12 @@ services:
       - RUVECTOR_HNSW_EF_CONSTRUCTION=100
 
     ports:
-      - "5432:5432"
+      - "5440:5432"
 
     volumes:
       - citus-coordinator-data:/var/lib/postgresql/data
       - ../../scripts/citus:/docker-entrypoint-initdb.d:ro
       - ../../config/citus:/etc/citus:ro
-
-    networks:
-      - citus-net
 
     deploy:
       resources:
@@ -94,7 +91,7 @@ services:
 
     command: >
       postgres
-      -c shared_preload_libraries='citus,ruvector'
+      -c shared_preload_libraries='citus'
       -c shared_buffers=512MB
       -c effective_cache_size=1536MB
       -c work_mem=32MB
@@ -112,7 +109,7 @@ services:
   # Citus Worker Node 1 (Shard Group 1)
   # ============================================================
   citus-worker-1:
-    image: ruvnet/ruvector-postgres:latest
+    image: citusdata/citus:12.1
     container_name: citus-worker-1
     hostname: citus-worker-1
     networks:
@@ -139,14 +136,11 @@ services:
       - RUVECTOR_HNSW_EF_CONSTRUCTION=100
 
     ports:
-      - "5433:5432"
+      - "5441:5432"
 
     volumes:
       - citus-worker-1-data:/var/lib/postgresql/data
       - ../../scripts/citus:/docker-entrypoint-initdb.d:ro
-
-    networks:
-      - citus-net
 
     deploy:
       resources:
@@ -168,7 +162,7 @@ services:
 
     command: >
       postgres
-      -c shared_preload_libraries='citus,ruvector'
+      -c shared_preload_libraries='citus'
       -c shared_buffers=1GB
       -c effective_cache_size=3GB
       -c work_mem=64MB
@@ -180,7 +174,7 @@ services:
   # Citus Worker Node 2 (Shard Group 2)
   # ============================================================
   citus-worker-2:
-    image: ruvnet/ruvector-postgres:latest
+    image: citusdata/citus:12.1
     container_name: citus-worker-2
     hostname: citus-worker-2
     networks:
@@ -203,14 +197,11 @@ services:
       - RUVECTOR_HNSW_EF_CONSTRUCTION=100
 
     ports:
-      - "5434:5432"
+      - "5442:5432"
 
     volumes:
       - citus-worker-2-data:/var/lib/postgresql/data
       - ../../scripts/citus:/docker-entrypoint-initdb.d:ro
-
-    networks:
-      - citus-net
 
     deploy:
       resources:
@@ -232,7 +223,7 @@ services:
 
     command: >
       postgres
-      -c shared_preload_libraries='citus,ruvector'
+      -c shared_preload_libraries='citus'
       -c shared_buffers=1GB
       -c effective_cache_size=3GB
       -c work_mem=64MB
