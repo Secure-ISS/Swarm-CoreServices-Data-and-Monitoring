@@ -4,9 +4,10 @@ Provides validation for user inputs, connection parameters, and SQL queries
 to prevent SQL injection and other input-based attacks.
 """
 
-import re
+# Standard library imports
 import logging
-from typing import Dict, Any, Optional, List
+import re
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 class ValidationError(Exception):
     """Raised when input validation fails."""
+
     pass
 
 
@@ -39,10 +41,10 @@ class InputValidator:
     ]
 
     # Valid identifier pattern (table/column names)
-    IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]{0,62}$')
+    IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")
 
     # Valid database name pattern
-    DATABASE_NAME_PATTERN = re.compile(r'^[a-zA-Z][a-zA-Z0-9_]{0,62}$')
+    DATABASE_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,62}$")
 
     @classmethod
     def validate_sql_input(cls, sql: str) -> bool:
@@ -111,24 +113,24 @@ class InputValidator:
         Raises:
             ValidationError: If parameters are invalid
         """
-        required = ['host', 'port', 'database', 'user']
+        required = ["host", "port", "database", "user"]
         missing = [key for key in required if key not in params]
 
         if missing:
             raise ValidationError(f"Missing required parameters: {', '.join(missing)}")
 
         # Validate host (IP or hostname)
-        host = params.get('host', '')
+        host = params.get("host", "")
         if not cls._validate_host(host):
             raise ValidationError(f"Invalid host: {host}")
 
         # Validate port
-        port = params.get('port')
+        port = params.get("port")
         if not isinstance(port, int) or not (1 <= port <= 65535):
             raise ValidationError(f"Invalid port: {port}. Must be 1-65535.")
 
         # Validate database name
-        database = params.get('database', '')
+        database = params.get("database", "")
         if not cls.DATABASE_NAME_PATTERN.match(database):
             raise ValidationError(
                 f"Invalid database name: {database}. "
@@ -136,7 +138,7 @@ class InputValidator:
             )
 
         # Validate user
-        user = params.get('user', '')
+        user = params.get("user", "")
         if not cls.IDENTIFIER_PATTERN.match(user):
             raise ValidationError(f"Invalid user: {user}")
 
@@ -149,19 +151,19 @@ class InputValidator:
             return False
 
         # Check for localhost
-        if host in ['localhost', '127.0.0.1', '::1']:
+        if host in ["localhost", "127.0.0.1", "::1"]:
             return True
 
         # Check for valid hostname/IP pattern
         hostname_pattern = re.compile(
-            r'^(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*'
-            r'[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)$'
+            r"^(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*"
+            r"[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)$"
         )
 
         # Simple IP pattern (v4)
         ip_pattern = re.compile(
-            r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}'
-            r'(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+            r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}"
+            r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
         )
 
         return bool(hostname_pattern.match(host) or ip_pattern.match(host))
@@ -186,7 +188,7 @@ class InputValidator:
             parsed = urlparse(conn_string)
 
             # Validate scheme
-            if parsed.scheme not in ['postgresql', 'postgres']:
+            if parsed.scheme not in ["postgresql", "postgres"]:
                 raise ValidationError(f"Invalid scheme: {parsed.scheme}")
 
             # Validate host

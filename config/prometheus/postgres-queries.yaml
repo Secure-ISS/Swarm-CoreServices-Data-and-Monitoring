@@ -1,0 +1,261 @@
+# Custom PostgreSQL queries for postgres_exporter
+# These queries expose additional RuVector and application-specific metrics
+
+# RuVector HNSW index statistics
+pg_ruvector_index_stats:
+  query: |
+    SELECT
+      schemaname,
+      tablename,
+      indexname,
+      idx_scan as scans,
+      idx_tup_read as tuples_read,
+      idx_tup_fetch as tuples_fetched
+    FROM pg_stat_user_indexes
+    WHERE indexname LIKE '%hnsw%'
+  metrics:
+    - schemaname:
+        usage: "LABEL"
+        description: "Schema name"
+    - tablename:
+        usage: "LABEL"
+        description: "Table name"
+    - indexname:
+        usage: "LABEL"
+        description: "Index name"
+    - scans:
+        usage: "COUNTER"
+        description: "Number of index scans"
+    - tuples_read:
+        usage: "COUNTER"
+        description: "Number of tuples read by index scans"
+    - tuples_fetched:
+        usage: "COUNTER"
+        description: "Number of tuples fetched by index scans"
+
+# RuVector table statistics
+pg_ruvector_table_stats:
+  query: |
+    SELECT
+      schemaname,
+      tablename,
+      n_tup_ins as inserts,
+      n_tup_upd as updates,
+      n_tup_del as deletes,
+      n_live_tup as live_tuples,
+      n_dead_tup as dead_tuples,
+      last_vacuum,
+      last_autovacuum,
+      last_analyze,
+      last_autoanalyze
+    FROM pg_stat_user_tables
+    WHERE schemaname IN ('public', 'claude_flow')
+      AND tablename IN ('embeddings', 'memory_entries', 'patterns', 'trajectories')
+  metrics:
+    - schemaname:
+        usage: "LABEL"
+        description: "Schema name"
+    - tablename:
+        usage: "LABEL"
+        description: "Table name"
+    - inserts:
+        usage: "COUNTER"
+        description: "Number of rows inserted"
+    - updates:
+        usage: "COUNTER"
+        description: "Number of rows updated"
+    - deletes:
+        usage: "COUNTER"
+        description: "Number of rows deleted"
+    - live_tuples:
+        usage: "GAUGE"
+        description: "Number of live tuples"
+    - dead_tuples:
+        usage: "GAUGE"
+        description: "Number of dead tuples"
+
+# Database connection statistics
+pg_database_connections:
+  query: |
+    SELECT
+      datname,
+      state,
+      COUNT(*) as connections
+    FROM pg_stat_activity
+    WHERE datname IS NOT NULL
+    GROUP BY datname, state
+  metrics:
+    - datname:
+        usage: "LABEL"
+        description: "Database name"
+    - state:
+        usage: "LABEL"
+        description: "Connection state"
+    - connections:
+        usage: "GAUGE"
+        description: "Number of connections"
+
+# Long-running queries
+pg_long_running_queries:
+  query: |
+    SELECT
+      datname,
+      usename,
+      state,
+      COUNT(*) as query_count,
+      MAX(EXTRACT(EPOCH FROM (now() - query_start))) as max_duration_seconds
+    FROM pg_stat_activity
+    WHERE state != 'idle'
+      AND query_start IS NOT NULL
+      AND now() - query_start > interval '5 seconds'
+    GROUP BY datname, usename, state
+  metrics:
+    - datname:
+        usage: "LABEL"
+        description: "Database name"
+    - usename:
+        usage: "LABEL"
+        description: "User name"
+    - state:
+        usage: "LABEL"
+        description: "Query state"
+    - query_count:
+        usage: "GAUGE"
+        description: "Number of long-running queries"
+    - max_duration_seconds:
+        usage: "GAUGE"
+        description: "Maximum query duration in seconds"
+
+# Replication lag
+pg_replication_lag:
+  query: |
+    SELECT
+      client_addr,
+      application_name,
+      state,
+      sync_state,
+      EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())) as lag_seconds
+    FROM pg_stat_replication
+  metrics:
+    - client_addr:
+        usage: "LABEL"
+        description: "Replica IP address"
+    - application_name:
+        usage: "LABEL"
+        description: "Application name"
+    - state:
+        usage: "LABEL"
+        description: "Replication state"
+    - sync_state:
+        usage: "LABEL"
+        description: "Sync state"
+    - lag_seconds:
+        usage: "GAUGE"
+        description: "Replication lag in seconds"
+
+# Table bloat estimation
+pg_table_bloat:
+  query: |
+    SELECT
+      schemaname,
+      tablename,
+      pg_total_relation_size(schemaname||'.'||tablename) as total_bytes,
+      pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename) as bloat_bytes,
+      CASE
+        WHEN pg_total_relation_size(schemaname||'.'||tablename) > 0
+        THEN (pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename))::float / pg_total_relation_size(schemaname||'.'||tablename)
+        ELSE 0
+      END as bloat_ratio
+    FROM pg_stat_user_tables
+    WHERE schemaname IN ('public', 'claude_flow')
+  metrics:
+    - schemaname:
+        usage: "LABEL"
+        description: "Schema name"
+    - tablename:
+        usage: "LABEL"
+        description: "Table name"
+    - total_bytes:
+        usage: "GAUGE"
+        description: "Total table size in bytes"
+    - bloat_bytes:
+        usage: "GAUGE"
+        description: "Estimated bloat in bytes"
+    - bloat_ratio:
+        usage: "GAUGE"
+        description: "Bloat ratio (0-1)"
+
+# Cache hit ratio per table
+pg_table_cache_hit:
+  query: |
+    SELECT
+      schemaname,
+      tablename,
+      heap_blks_hit as hits,
+      heap_blks_read as reads,
+      CASE
+        WHEN (heap_blks_hit + heap_blks_read) > 0
+        THEN heap_blks_hit::float / (heap_blks_hit + heap_blks_read)
+        ELSE 1.0
+      END as hit_ratio
+    FROM pg_statio_user_tables
+    WHERE schemaname IN ('public', 'claude_flow')
+  metrics:
+    - schemaname:
+        usage: "LABEL"
+        description: "Schema name"
+    - tablename:
+        usage: "LABEL"
+        description: "Table name"
+    - hits:
+        usage: "COUNTER"
+        description: "Number of cache hits"
+    - reads:
+        usage: "COUNTER"
+        description: "Number of disk reads"
+    - hit_ratio:
+        usage: "GAUGE"
+        description: "Cache hit ratio (0-1)"
+
+# Checkpoint statistics
+pg_checkpoint_stats:
+  query: |
+    SELECT
+      checkpoints_timed,
+      checkpoints_req,
+      checkpoint_write_time,
+      checkpoint_sync_time,
+      buffers_checkpoint,
+      buffers_clean,
+      buffers_backend,
+      buffers_backend_fsync,
+      buffers_alloc
+    FROM pg_stat_bgwriter
+  metrics:
+    - checkpoints_timed:
+        usage: "COUNTER"
+        description: "Number of scheduled checkpoints"
+    - checkpoints_req:
+        usage: "COUNTER"
+        description: "Number of requested checkpoints"
+    - checkpoint_write_time:
+        usage: "COUNTER"
+        description: "Checkpoint write time in milliseconds"
+    - checkpoint_sync_time:
+        usage: "COUNTER"
+        description: "Checkpoint sync time in milliseconds"
+    - buffers_checkpoint:
+        usage: "COUNTER"
+        description: "Buffers written during checkpoints"
+    - buffers_clean:
+        usage: "COUNTER"
+        description: "Buffers written by background writer"
+    - buffers_backend:
+        usage: "COUNTER"
+        description: "Buffers written directly by backend"
+    - buffers_backend_fsync:
+        usage: "COUNTER"
+        description: "Backend fsync calls"
+    - buffers_alloc:
+        usage: "COUNTER"
+        description: "Buffers allocated"

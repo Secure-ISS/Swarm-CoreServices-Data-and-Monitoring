@@ -4,9 +4,12 @@ Citus-specific MCP tools for distributed cluster management.
 These tools extend postgres-mcp with Citus distributed database capabilities.
 """
 
-from typing import Any, Dict, List
-import asyncpg
+# Standard library imports
 import logging
+from typing import Any, Dict, List
+
+# Third-party imports
+import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +23,7 @@ class CitusTools:
 
     async def initialize(self):
         """Initialize connection pool."""
-        self.pool = await asyncpg.create_pool(
-            self.connection_url,
-            min_size=2,
-            max_size=10
-        )
+        self.pool = await asyncpg.create_pool(self.connection_url, min_size=2, max_size=10)
 
     async def close(self):
         """Close connection pool."""
@@ -81,9 +80,7 @@ class CitusTools:
             return [dict(row) for row in rows]
 
     async def rebalance_shards(
-        self,
-        strategy: str = "by_shard_count",
-        drain_only: bool = False
+        self, strategy: str = "by_shard_count", drain_only: bool = False
     ) -> Dict[str, Any]:
         """
         Rebalance shards across worker nodes.
@@ -109,10 +106,7 @@ class CitusTools:
             status_query = "SELECT * FROM citus_rebalance_status()"
             status_rows = await conn.fetch(status_query)
 
-            return {
-                "job_id": row["job_id"],
-                "status": [dict(s) for s in status_rows]
-            }
+            return {"job_id": row["job_id"], "status": [dict(s) for s in status_rows]}
 
     async def get_rebalance_status(self) -> List[Dict[str, Any]]:
         """Get current rebalancing job status."""
@@ -210,11 +204,7 @@ CITUS_TOOLS = [
     {
         "name": "citus_shard_distribution",
         "description": "Show how shards are distributed across worker nodes with counts and sizes",
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
+        "inputSchema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "citus_distributed_query_stats",
@@ -225,11 +215,11 @@ CITUS_TOOLS = [
                 "limit": {
                     "type": "integer",
                     "description": "Number of top queries to return",
-                    "default": 10
+                    "default": 10,
                 }
             },
-            "required": []
-        }
+            "required": [],
+        },
     },
     {
         "name": "citus_rebalance_shards",
@@ -241,33 +231,25 @@ CITUS_TOOLS = [
                     "type": "string",
                     "enum": ["by_shard_count", "by_disk_size"],
                     "description": "Rebalancing strategy",
-                    "default": "by_shard_count"
+                    "default": "by_shard_count",
                 },
                 "drain_only": {
                     "type": "boolean",
                     "description": "Only drain nodes marked for removal",
-                    "default": False
-                }
+                    "default": False,
+                },
             },
-            "required": []
-        }
+            "required": [],
+        },
     },
     {
         "name": "citus_worker_health",
         "description": "Check health status of all worker nodes",
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
+        "inputSchema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "citus_table_types",
         "description": "List all tables showing whether they are distributed, reference, or local",
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-    }
+        "inputSchema": {"type": "object", "properties": {}, "required": []},
+    },
 ]

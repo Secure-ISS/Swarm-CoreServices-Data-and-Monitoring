@@ -10,21 +10,23 @@ Tests cover:
     - Error handling
 """
 
+# Standard library imports
 import sys
-import time
 import threading
+import time
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Local imports
 from src.db.hnsw_profiles import (
+    PROFILES,
+    HNSWProfile,
     HNSWProfileManager,
     ProfileType,
-    HNSWProfile,
-    PROFILES,
-    create_profile_manager
+    create_profile_manager,
 )
 
 
@@ -95,9 +97,7 @@ class TestProfileManager:
 
         # Create manager
         self.manager = HNSWProfileManager(
-            pool=self.mock_pool,
-            schema="claude_flow",
-            auto_adjust=False
+            pool=self.mock_pool, schema="claude_flow", auto_adjust=False
         )
 
     def test_initialization(self):
@@ -130,10 +130,7 @@ class TestProfileManager:
 
     def test_switch_profile_success(self):
         """Test successful profile switch."""
-        result = self.manager.switch_profile(
-            ProfileType.SPEED,
-            reason="Test switch"
-        )
+        result = self.manager.switch_profile(ProfileType.SPEED, reason="Test switch")
 
         assert result is True
         assert self.manager._current_profile == ProfileType.SPEED
@@ -182,10 +179,7 @@ class TestLoadCalculation:
         self.mock_pool.getconn.return_value = self.mock_conn
 
         self.manager = HNSWProfileManager(
-            pool=self.mock_pool,
-            auto_adjust=True,
-            load_threshold_high=0.8,
-            load_threshold_low=0.4
+            pool=self.mock_pool, auto_adjust=True, load_threshold_high=0.8, load_threshold_low=0.4
         )
 
     def test_recommend_profile_low_load(self):
@@ -209,32 +203,24 @@ class TestLoadCalculation:
     def test_get_recommendation_by_pattern(self):
         """Test recommendations based on query pattern."""
         # Research pattern → ACCURACY
-        profile, reason = self.manager.get_recommendation(
-            query_pattern="research"
-        )
+        profile, reason = self.manager.get_recommendation(query_pattern="research")
         assert profile == ProfileType.ACCURACY
         assert "research" in reason.lower()
 
         # Batch pattern → SPEED
-        profile, reason = self.manager.get_recommendation(
-            query_pattern="batch"
-        )
+        profile, reason = self.manager.get_recommendation(query_pattern="batch")
         assert profile == ProfileType.SPEED
         assert "batch" in reason.lower()
 
     def test_get_recommendation_by_qps(self):
         """Test recommendations based on QPS."""
         # High QPS → SPEED
-        profile, reason = self.manager.get_recommendation(
-            expected_qps=150
-        )
+        profile, reason = self.manager.get_recommendation(expected_qps=150)
         assert profile == ProfileType.SPEED
         assert "QPS" in reason or "qps" in reason.lower()
 
         # Low QPS → ACCURACY
-        profile, reason = self.manager.get_recommendation(
-            expected_qps=5
-        )
+        profile, reason = self.manager.get_recommendation(expected_qps=5)
         assert profile == ProfileType.ACCURACY
 
 
@@ -255,10 +241,7 @@ class TestAutoAdjustment:
 
         self.mock_pool.getconn.return_value = self.mock_conn
 
-        self.manager = HNSWProfileManager(
-            pool=self.mock_pool,
-            auto_adjust=True
-        )
+        self.manager = HNSWProfileManager(pool=self.mock_pool, auto_adjust=True)
 
     def test_auto_adjust_disabled(self):
         """Test auto-adjust returns None when disabled."""
@@ -266,7 +249,7 @@ class TestAutoAdjustment:
         result = self.manager.auto_adjust_profile()
         assert result is None
 
-    @patch.object(HNSWProfileManager, '_calculate_load_ratio')
+    @patch.object(HNSWProfileManager, "_calculate_load_ratio")
     def test_auto_adjust_switches_on_high_load(self, mock_load):
         """Test auto-adjust switches to SPEED on high load."""
         mock_load.return_value = 0.85  # > 80%
@@ -276,7 +259,7 @@ class TestAutoAdjustment:
         assert result == ProfileType.SPEED
         assert self.manager._current_profile == ProfileType.SPEED
 
-    @patch.object(HNSWProfileManager, '_calculate_load_ratio')
+    @patch.object(HNSWProfileManager, "_calculate_load_ratio")
     def test_auto_adjust_no_change_when_optimal(self, mock_load):
         """Test auto-adjust doesn't switch when already optimal."""
         # Already BALANCED, load is 50%
@@ -416,7 +399,9 @@ class TestErrorHandling:
 
 def run_tests():
     """Run all tests."""
+    # Third-party imports
     import pytest
+
     return pytest.main([__file__, "-v", "--tb=short"])
 
 

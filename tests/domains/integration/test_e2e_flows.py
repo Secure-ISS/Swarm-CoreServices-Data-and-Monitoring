@@ -7,22 +7,19 @@ Tests complete integration flows across multiple components:
 - Event Bus → Handlers → Storage
 """
 
+# Standard library imports
 import os
 import sys
-import unittest
 import time
-from typing import Dict, Any
+import unittest
+from typing import Any, Dict
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+# Local imports
 from src.db.pool import DualDatabasePools
-from src.db.vector_ops import (
-    store_memory,
-    search_memory,
-    retrieve_memory,
-    delete_memory
-)
+from src.db.vector_ops import delete_memory, retrieve_memory, search_memory, store_memory
 
 
 class TestMemoryStorageFlow(unittest.TestCase):
@@ -39,7 +36,7 @@ class TestMemoryStorageFlow(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up pools."""
-        if hasattr(cls, 'pools'):
+        if hasattr(cls, "pools"):
             cls.pools.close()
 
     def test_complete_memory_lifecycle(self):
@@ -57,7 +54,7 @@ class TestMemoryStorageFlow(unittest.TestCase):
                 key=key,
                 value=value,
                 embedding=embedding,
-                metadata={"test": "lifecycle"}
+                metadata={"test": "lifecycle"},
             )
 
         # 2. Retrieve memory
@@ -65,22 +62,18 @@ class TestMemoryStorageFlow(unittest.TestCase):
             result = retrieve_memory(cur, namespace, key)
 
         self.assertIsNotNone(result)
-        self.assertEqual(result['value'], value)
-        self.assertEqual(result['metadata']['test'], 'lifecycle')
+        self.assertEqual(result["value"], value)
+        self.assertEqual(result["metadata"]["test"], "lifecycle")
 
         # 3. Search for memory
         with self.pools.project_cursor() as cur:
             search_results = search_memory(
-                cur,
-                namespace=namespace,
-                query_embedding=embedding,
-                limit=10,
-                min_similarity=0.9
+                cur, namespace=namespace, query_embedding=embedding, limit=10, min_similarity=0.9
             )
 
         self.assertGreater(len(search_results), 0)
-        self.assertEqual(search_results[0]['key'], key)
-        self.assertGreater(search_results[0]['similarity'], 0.99)
+        self.assertEqual(search_results[0]["key"], key)
+        self.assertGreater(search_results[0]["similarity"], 0.99)
 
         # 4. Delete memory
         with self.pools.project_cursor() as cur:
@@ -101,21 +94,11 @@ class TestMemoryStorageFlow(unittest.TestCase):
 
         # Store in project database
         with self.pools.project_cursor() as cur:
-            store_memory(
-                cur,
-                namespace=namespace,
-                key=key,
-                value="project_value"
-            )
+            store_memory(cur, namespace=namespace, key=key, value="project_value")
 
         # Store in shared database with same namespace/key
         with self.pools.shared_cursor() as cur:
-            store_memory(
-                cur,
-                namespace=namespace,
-                key=key,
-                value="shared_value"
-            )
+            store_memory(cur, namespace=namespace, key=key, value="shared_value")
 
         # Verify isolation
         with self.pools.project_cursor() as cur:
@@ -124,8 +107,8 @@ class TestMemoryStorageFlow(unittest.TestCase):
         with self.pools.shared_cursor() as cur:
             shared_result = retrieve_memory(cur, namespace, key)
 
-        self.assertEqual(project_result['value'], "project_value")
-        self.assertEqual(shared_result['value'], "shared_value")
+        self.assertEqual(project_result["value"], "project_value")
+        self.assertEqual(shared_result["value"], "shared_value")
 
 
 class TestVectorSearchFlow(unittest.TestCase):
@@ -144,20 +127,20 @@ class TestVectorSearchFlow(unittest.TestCase):
         # Store test data
         cls.test_data = [
             {
-                'key': 'doc1',
-                'value': 'Machine learning and AI',
-                'embedding': [0.8, 0.6] + [0.0] * 382
+                "key": "doc1",
+                "value": "Machine learning and AI",
+                "embedding": [0.8, 0.6] + [0.0] * 382,
             },
             {
-                'key': 'doc2',
-                'value': 'Database management systems',
-                'embedding': [0.2, 0.9] + [0.0] * 382
+                "key": "doc2",
+                "value": "Database management systems",
+                "embedding": [0.2, 0.9] + [0.0] * 382,
             },
             {
-                'key': 'doc3',
-                'value': 'Deep learning neural networks',
-                'embedding': [0.9, 0.5] + [0.0] * 382
-            }
+                "key": "doc3",
+                "value": "Deep learning neural networks",
+                "embedding": [0.9, 0.5] + [0.0] * 382,
+            },
         ]
 
         with cls.pools.project_cursor() as cur:
@@ -165,18 +148,18 @@ class TestVectorSearchFlow(unittest.TestCase):
                 store_memory(
                     cur,
                     namespace=cls.namespace,
-                    key=doc['key'],
-                    value=doc['value'],
-                    embedding=doc['embedding']
+                    key=doc["key"],
+                    value=doc["value"],
+                    embedding=doc["embedding"],
                 )
 
     @classmethod
     def tearDownClass(cls):
         """Clean up test data and pools."""
-        if hasattr(cls, 'pools'):
+        if hasattr(cls, "pools"):
             with cls.pools.project_cursor() as cur:
                 for doc in cls.test_data:
-                    delete_memory(cur, cls.namespace, doc['key'])
+                    delete_memory(cur, cls.namespace, doc["key"])
 
             cls.pools.close()
 
@@ -187,18 +170,14 @@ class TestVectorSearchFlow(unittest.TestCase):
 
         with self.pools.project_cursor() as cur:
             results = search_memory(
-                cur,
-                namespace=self.namespace,
-                query_embedding=query,
-                limit=3,
-                min_similarity=0.5
+                cur, namespace=self.namespace, query_embedding=query, limit=3, min_similarity=0.5
             )
 
         self.assertGreater(len(results), 0)
 
         # First result should be doc1 or doc3 (both ML-related)
         top_result = results[0]
-        self.assertIn(top_result['key'], ['doc1', 'doc3'])
+        self.assertIn(top_result["key"], ["doc1", "doc3"])
 
     def test_search_with_threshold(self):
         """Test search with similarity threshold."""
@@ -208,20 +187,12 @@ class TestVectorSearchFlow(unittest.TestCase):
         with self.pools.project_cursor() as cur:
             # High threshold - should get fewer/no results
             strict_results = search_memory(
-                cur,
-                namespace=self.namespace,
-                query_embedding=query,
-                limit=10,
-                min_similarity=0.99
+                cur, namespace=self.namespace, query_embedding=query, limit=10, min_similarity=0.99
             )
 
             # Low threshold - should get all results
             loose_results = search_memory(
-                cur,
-                namespace=self.namespace,
-                query_embedding=query,
-                limit=10,
-                min_similarity=0.0
+                cur, namespace=self.namespace, query_embedding=query, limit=10, min_similarity=0.0
             )
 
         self.assertEqual(len(strict_results), 0)
@@ -234,20 +205,12 @@ class TestVectorSearchFlow(unittest.TestCase):
         with self.pools.project_cursor() as cur:
             # Limit to 1 result
             results_1 = search_memory(
-                cur,
-                namespace=self.namespace,
-                query_embedding=query,
-                limit=1,
-                min_similarity=0.0
+                cur, namespace=self.namespace, query_embedding=query, limit=1, min_similarity=0.0
             )
 
             # Limit to 2 results
             results_2 = search_memory(
-                cur,
-                namespace=self.namespace,
-                query_embedding=query,
-                limit=2,
-                min_similarity=0.0
+                cur, namespace=self.namespace, query_embedding=query, limit=2, min_similarity=0.0
             )
 
         self.assertEqual(len(results_1), 1)
@@ -268,11 +231,12 @@ class TestConcurrentAccessFlow(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up pools."""
-        if hasattr(cls, 'pools'):
+        if hasattr(cls, "pools"):
             cls.pools.close()
 
     def test_concurrent_writes(self):
         """Test concurrent write operations."""
+        # Standard library imports
         import threading
 
         namespace = f"test_concurrent_{int(time.time())}"
@@ -288,10 +252,7 @@ class TestConcurrentAccessFlow(unittest.TestCase):
                     with self.pools.project_cursor() as cur:
                         key = f"thread_{thread_id}_item_{i}"
                         store_memory(
-                            cur,
-                            namespace=namespace,
-                            key=key,
-                            value=f"value_{thread_id}_{i}"
+                            cur, namespace=namespace, key=key, value=f"value_{thread_id}_{i}"
                         )
                         successful_writes.append(key)
             except Exception as e:
@@ -310,13 +271,11 @@ class TestConcurrentAccessFlow(unittest.TestCase):
 
         # Verify
         self.assertEqual(len(errors), 0, f"Errors occurred: {errors}")
-        self.assertEqual(
-            len(successful_writes),
-            num_threads * writes_per_thread
-        )
+        self.assertEqual(len(successful_writes), num_threads * writes_per_thread)
 
     def test_concurrent_reads(self):
         """Test concurrent read operations."""
+        # Standard library imports
         import threading
 
         namespace = f"test_read_{int(time.time())}"
@@ -324,12 +283,7 @@ class TestConcurrentAccessFlow(unittest.TestCase):
         # Store test data
         with self.pools.project_cursor() as cur:
             for i in range(10):
-                store_memory(
-                    cur,
-                    namespace=namespace,
-                    key=f"key_{i}",
-                    value=f"value_{i}"
-                )
+                store_memory(cur, namespace=namespace, key=f"key_{i}", value=f"value_{i}")
 
         # Concurrent reads
         results = []
@@ -339,11 +293,7 @@ class TestConcurrentAccessFlow(unittest.TestCase):
             """Worker that reads an entry."""
             try:
                 with self.pools.project_cursor() as cur:
-                    result = retrieve_memory(
-                        cur,
-                        namespace,
-                        f"key_{key_index}"
-                    )
+                    result = retrieve_memory(cur, namespace, f"key_{key_index}")
                     if result:
                         results.append(result)
             except Exception as e:
@@ -379,7 +329,7 @@ class TestErrorRecoveryFlow(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up pools."""
-        if hasattr(cls, 'pools'):
+        if hasattr(cls, "pools"):
             cls.pools.close()
 
     def test_transaction_rollback_recovery(self):
@@ -394,11 +344,7 @@ class TestErrorRecoveryFlow(unittest.TestCase):
         try:
             with self.pools.project_cursor() as cur:
                 store_memory(
-                    cur,
-                    namespace,
-                    "key2",
-                    "value2",
-                    embedding=[0.1] * 512  # Wrong dimensions
+                    cur, namespace, "key2", "value2", embedding=[0.1] * 512  # Wrong dimensions
                 )
         except Exception:
             pass  # Expected
@@ -427,10 +373,7 @@ class TestErrorRecoveryFlow(unittest.TestCase):
         # Pool should still be healthy
         health_after = self.pools.health_check()
 
-        self.assertEqual(
-            health_before['project']['status'],
-            health_after['project']['status']
-        )
+        self.assertEqual(health_before["project"]["status"], health_after["project"]["status"])
 
 
 def run_e2e_integration_tests():

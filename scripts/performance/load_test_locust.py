@@ -10,21 +10,25 @@ Or run headless:
         --users 100 --spawn-rate 10 --run-time 5m \\
         --headless --html reports/load_test_results.html
 """
-from locust import User, task, between, events
+# Standard library imports
 import asyncio
+import os
+import sys
+import time
+from pathlib import Path
+
+# Third-party imports
 import asyncpg
 import numpy as np
-import time
-import sys
-import os
-from pathlib import Path
+from locust import User, between, events, task
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# Third-party imports
 from dotenv import load_dotenv
 
 # Load environment
-load_dotenv(Path(__file__).parent.parent.parent / '.env')
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 # Global connection pool (shared across all users)
 _global_pool = None
@@ -44,10 +48,7 @@ async def get_connection_pool():
         )
 
         _global_pool = await asyncpg.create_pool(
-            conn_string,
-            min_size=10,
-            max_size=100,
-            command_timeout=30
+            conn_string, min_size=10, max_size=100, command_timeout=30
         )
 
     return _global_pool
@@ -92,11 +93,7 @@ class VectorSearchUser(User):
 
             # Execute search
             result_count = self.loop.run_until_complete(
-                self._execute_vector_search(
-                    query_embedding,
-                    self.namespace,
-                    limit=10
-                )
+                self._execute_vector_search(query_embedding, self.namespace, limit=10)
             )
 
             # Report success to Locust
@@ -107,7 +104,7 @@ class VectorSearchUser(User):
                 response_time=total_time,
                 response_length=result_count,
                 exception=None,
-                context={}
+                context={},
             )
 
         except Exception as e:
@@ -118,7 +115,7 @@ class VectorSearchUser(User):
                 response_time=total_time,
                 response_length=0,
                 exception=e,
-                context={}
+                context={},
             )
 
     @task(weight=3)
@@ -138,11 +135,7 @@ class VectorSearchUser(User):
             namespaces = [f"user-namespace-{i}" for i in range(5)]
 
             result_count = self.loop.run_until_complete(
-                self._execute_cross_shard_search(
-                    query_embedding,
-                    namespaces,
-                    limit=20
-                )
+                self._execute_cross_shard_search(query_embedding, namespaces, limit=20)
             )
 
             total_time = int((time.time() - start_time) * 1000)
@@ -152,7 +145,7 @@ class VectorSearchUser(User):
                 response_time=total_time,
                 response_length=result_count,
                 exception=None,
-                context={}
+                context={},
             )
 
         except Exception as e:
@@ -163,7 +156,7 @@ class VectorSearchUser(User):
                 response_time=total_time,
                 response_length=0,
                 exception=e,
-                context={}
+                context={},
             )
 
     @task(weight=1)
@@ -184,12 +177,7 @@ class VectorSearchUser(User):
 
             # Execute insert
             self.loop.run_until_complete(
-                self._execute_insert(
-                    self.namespace,
-                    key,
-                    value,
-                    embedding
-                )
+                self._execute_insert(self.namespace, key, value, embedding)
             )
 
             total_time = int((time.time() - start_time) * 1000)
@@ -199,7 +187,7 @@ class VectorSearchUser(User):
                 response_time=total_time,
                 response_length=1,
                 exception=None,
-                context={}
+                context={},
             )
 
         except Exception as e:
@@ -210,7 +198,7 @@ class VectorSearchUser(User):
                 response_time=total_time,
                 response_length=0,
                 exception=e,
-                context={}
+                context={},
             )
 
     @task(weight=2)
@@ -227,9 +215,7 @@ class VectorSearchUser(User):
             # Retrieve a random key (most will not exist, simulating cache misses)
             key = f"load-test-{np.random.randint(0, 1000000)}"
 
-            found = self.loop.run_until_complete(
-                self._execute_retrieve(self.namespace, key)
-            )
+            found = self.loop.run_until_complete(self._execute_retrieve(self.namespace, key))
 
             total_time = int((time.time() - start_time) * 1000)
             events.request.fire(
@@ -238,7 +224,7 @@ class VectorSearchUser(User):
                 response_time=total_time,
                 response_length=1 if found else 0,
                 exception=None,
-                context={}
+                context={},
             )
 
         except Exception as e:
@@ -249,7 +235,7 @@ class VectorSearchUser(User):
                 response_time=total_time,
                 response_length=0,
                 exception=e,
-                context={}
+                context={},
             )
 
     # Helper methods for database operations
@@ -259,7 +245,8 @@ class VectorSearchUser(User):
         async with self.pool.acquire() as conn:
             embedding_str = f"[{','.join(str(v) for v in embedding)}]"
 
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 SELECT namespace, key, value, metadata,
                        1 - (embedding <=> $1::ruvector) as similarity
                 FROM memory_entries
@@ -268,7 +255,11 @@ class VectorSearchUser(User):
                   AND (1 - (embedding <=> $1::ruvector)) >= 0.7
                 ORDER BY embedding <=> $1::ruvector
                 LIMIT $3
-            """, embedding_str, namespace, limit)
+            """,
+                embedding_str,
+                namespace,
+                limit,
+            )
 
             return len(rows)
 
@@ -277,7 +268,8 @@ class VectorSearchUser(User):
         async with self.pool.acquire() as conn:
             embedding_str = f"[{','.join(str(v) for v in embedding)}]"
 
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 SELECT namespace, key, value, metadata,
                        1 - (embedding <=> $1::ruvector) as similarity
                 FROM memory_entries
@@ -285,7 +277,11 @@ class VectorSearchUser(User):
                   AND embedding IS NOT NULL
                 ORDER BY embedding <=> $1::ruvector
                 LIMIT $3
-            """, embedding_str, namespaces, limit)
+            """,
+                embedding_str,
+                namespaces,
+                limit,
+            )
 
             return len(rows)
 
@@ -294,23 +290,33 @@ class VectorSearchUser(User):
         async with self.pool.acquire() as conn:
             embedding_str = f"[{','.join(str(v) for v in embedding)}]"
 
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO memory_entries (namespace, key, value, embedding)
                 VALUES ($1, $2, $3, $4::ruvector)
                 ON CONFLICT (namespace, key) DO UPDATE
                 SET value = EXCLUDED.value,
                     embedding = EXCLUDED.embedding,
                     updated_at = NOW()
-            """, namespace, key, value, embedding_str)
+            """,
+                namespace,
+                key,
+                value,
+                embedding_str,
+            )
 
     async def _execute_retrieve(self, namespace, key):
         """Execute retrieve operation."""
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT namespace, key, value, metadata
                 FROM memory_entries
                 WHERE namespace = $1 AND key = $2
-            """, namespace, key)
+            """,
+                namespace,
+                key,
+            )
 
             return row is not None
 
@@ -343,16 +349,16 @@ class BulkInsertUser(User):
             batch = []
             for i in range(batch_size):
                 embedding = np.random.randn(384).tolist()
-                batch.append({
-                    'key': f'bulk-{int(time.time() * 1000000)}-{i}',
-                    'value': f'Bulk entry {i}',
-                    'embedding': embedding
-                })
+                batch.append(
+                    {
+                        "key": f"bulk-{int(time.time() * 1000000)}-{i}",
+                        "value": f"Bulk entry {i}",
+                        "embedding": embedding,
+                    }
+                )
 
             # Execute batch insert
-            self.loop.run_until_complete(
-                self._execute_batch_insert(self.namespace, batch)
-            )
+            self.loop.run_until_complete(self._execute_batch_insert(self.namespace, batch))
 
             total_time = int((time.time() - start_time) * 1000)
             events.request.fire(
@@ -361,7 +367,7 @@ class BulkInsertUser(User):
                 response_time=total_time,
                 response_length=batch_size,
                 exception=None,
-                context={}
+                context={},
             )
 
         except Exception as e:
@@ -372,7 +378,7 @@ class BulkInsertUser(User):
                 response_time=total_time,
                 response_length=0,
                 exception=e,
-                context={}
+                context={},
             )
 
     async def _execute_batch_insert(self, namespace, batch):
@@ -381,33 +387,39 @@ class BulkInsertUser(User):
             async with conn.transaction():
                 for item in batch:
                     embedding_str = f"[{','.join(str(v) for v in item['embedding'])}]"
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO memory_entries (namespace, key, value, embedding)
                         VALUES ($1, $2, $3, $4::ruvector)
                         ON CONFLICT (namespace, key) DO UPDATE
                         SET value = EXCLUDED.value,
                             embedding = EXCLUDED.embedding
-                    """, namespace, item['key'], item['value'], embedding_str)
+                    """,
+                        namespace,
+                        item["key"],
+                        item["value"],
+                        embedding_str,
+                    )
 
 
 @events.test_start.add_listener
 def on_test_start(environment, **kwargs):
     """Called when test starts."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("🚀 Load Test Starting")
-    print("="*60)
+    print("=" * 60)
     print(f"Target host: {environment.host}")
     print(f"Users: {environment.runner.target_user_count}")
     print(f"Spawn rate: {environment.runner.spawn_rate}")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
 
 @events.test_stop.add_listener
 def on_test_stop(environment, **kwargs):
     """Called when test stops."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("🏁 Load Test Completed")
-    print("="*60)
+    print("=" * 60)
 
     # Print summary statistics
     stats = environment.runner.stats
@@ -422,7 +434,7 @@ def on_test_stop(environment, **kwargs):
     print(f"  95th percentile: {stats.total.get_response_time_percentile(0.95)}")
     print(f"  99th percentile: {stats.total.get_response_time_percentile(0.99)}")
 
-    print("\n" + "="*60 + "\n")
+    print("\n" + "=" * 60 + "\n")
 
     # Close global pool
     global _global_pool

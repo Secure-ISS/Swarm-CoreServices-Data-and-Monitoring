@@ -4,23 +4,25 @@
 Tests connection pooling, query routing, shard awareness, and distributed transactions.
 """
 
+# Standard library imports
 import os
 import sys
-import unittest
 import time
+import unittest
 from typing import List
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Local imports
 from src.db.distributed_pool import (
-    DistributedDatabasePool,
     DatabaseNode,
+    DistributedConnectionError,
+    DistributedDatabasePool,
     NodeRole,
     QueryType,
     RetryConfig,
-    DistributedConnectionError,
-    create_pool_from_env
+    create_pool_from_env,
 )
 
 
@@ -31,12 +33,12 @@ class TestDistributedPoolBasic(unittest.TestCase):
     def setUpClass(cls):
         """Set up test database connection."""
         cls.coordinator = DatabaseNode(
-            host=os.getenv('COORDINATOR_HOST', 'localhost'),
-            port=int(os.getenv('COORDINATOR_PORT', '5432')),
-            database=os.getenv('COORDINATOR_DB', 'distributed_postgres_cluster'),
-            user=os.getenv('COORDINATOR_USER', 'dpg_cluster'),
-            password=os.getenv('COORDINATOR_PASSWORD', 'dpg_cluster_2026'),
-            role=NodeRole.COORDINATOR
+            host=os.getenv("COORDINATOR_HOST", "localhost"),
+            port=int(os.getenv("COORDINATOR_PORT", "5432")),
+            database=os.getenv("COORDINATOR_DB", "distributed_postgres_cluster"),
+            user=os.getenv("COORDINATOR_USER", "dpg_cluster"),
+            password=os.getenv("COORDINATOR_PASSWORD") or "test_password_only",
+            role=NodeRole.COORDINATOR,
         )
 
     def setUp(self):
@@ -59,101 +61,93 @@ class TestDistributedPoolBasic(unittest.TestCase):
         with self.pool.cursor(QueryType.READ) as cur:
             cur.execute("SELECT 1 as test")
             result = cur.fetchone()
-            self.assertEqual(result['test'], 1)
+            self.assertEqual(result["test"], 1)
 
     def test_simple_write_query(self):
         """Test simple write query."""
         # Create test table
         with self.pool.cursor(QueryType.WRITE) as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS test_distributed_writes (
                     id SERIAL PRIMARY KEY,
                     value TEXT,
                     created_at TIMESTAMP DEFAULT NOW()
                 )
-            """)
+            """
+            )
 
         # Insert data
         test_value = f"test_{int(time.time())}"
         with self.pool.cursor(QueryType.WRITE) as cur:
             cur.execute(
                 "INSERT INTO test_distributed_writes (value) VALUES (%s) RETURNING id",
-                (test_value,)
+                (test_value,),
             )
             result = cur.fetchone()
-            self.assertIsNotNone(result['id'])
+            self.assertIsNotNone(result["id"])
 
         # Verify data
         with self.pool.cursor(QueryType.READ) as cur:
-            cur.execute(
-                "SELECT * FROM test_distributed_writes WHERE value = %s",
-                (test_value,)
-            )
+            cur.execute("SELECT * FROM test_distributed_writes WHERE value = %s", (test_value,))
             result = cur.fetchone()
-            self.assertEqual(result['value'], test_value)
+            self.assertEqual(result["value"], test_value)
 
     def test_transaction_commit(self):
         """Test transaction commit."""
         with self.pool.cursor(QueryType.WRITE) as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS test_transactions (
                     id SERIAL PRIMARY KEY,
                     value TEXT
                 )
-            """)
+            """
+            )
 
         test_value = f"commit_test_{int(time.time())}"
 
         with self.pool.cursor(QueryType.WRITE) as cur:
-            cur.execute(
-                "INSERT INTO test_transactions (value) VALUES (%s)",
-                (test_value,)
-            )
+            cur.execute("INSERT INTO test_transactions (value) VALUES (%s)", (test_value,))
 
         # Verify committed
         with self.pool.cursor(QueryType.READ) as cur:
             cur.execute(
-                "SELECT COUNT(*) as count FROM test_transactions WHERE value = %s",
-                (test_value,)
+                "SELECT COUNT(*) as count FROM test_transactions WHERE value = %s", (test_value,)
             )
             result = cur.fetchone()
-            self.assertEqual(result['count'], 1)
+            self.assertEqual(result["count"], 1)
 
     def test_transaction_rollback(self):
         """Test transaction rollback on error."""
         with self.pool.cursor(QueryType.WRITE) as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS test_rollback (
                     id SERIAL PRIMARY KEY,
                     value TEXT UNIQUE
                 )
-            """)
+            """
+            )
 
         test_value = f"rollback_test_{int(time.time())}"
 
         # First insert
         with self.pool.cursor(QueryType.WRITE) as cur:
-            cur.execute(
-                "INSERT INTO test_rollback (value) VALUES (%s)",
-                (test_value,)
-            )
+            cur.execute("INSERT INTO test_rollback (value) VALUES (%s)", (test_value,))
 
         # Second insert (should fail due to unique constraint)
         with self.assertRaises(Exception):
             with self.pool.cursor(QueryType.WRITE) as cur:
-                cur.execute(
-                    "INSERT INTO test_rollback (value) VALUES (%s)",
-                    (test_value,)
-                )
+                cur.execute("INSERT INTO test_rollback (value) VALUES (%s)", (test_value,))
 
         # Should still have only one row
         with self.pool.cursor(QueryType.READ) as cur:
             cur.execute(
-                "SELECT COUNT(*) as count FROM test_rollback WHERE value = %s",
-                (test_value,)
+                "SELECT COUNT(*) as count FROM test_rollback WHERE value = %s", (test_value,)
             )
             result = cur.fetchone()
-            self.assertEqual(result['count'], 1)
+            self.assertEqual(result["count"], 1)
 
     def test_statistics_tracking(self):
         """Test query statistics tracking."""
@@ -168,20 +162,20 @@ class TestDistributedPoolBasic(unittest.TestCase):
 
         final_stats = self.pool.get_statistics()
 
-        self.assertGreater(final_stats['total'], initial_stats['total'])
-        self.assertGreater(final_stats['reads'], initial_stats['reads'])
+        self.assertGreater(final_stats["total"], initial_stats["total"])
+        self.assertGreater(final_stats["reads"], initial_stats["reads"])
 
     def test_health_check(self):
         """Test health check functionality."""
         health = self.pool.health_check()
 
-        self.assertIn('coordinator', health)
-        self.assertIn('workers', health)
-        self.assertIn('replicas', health)
-        self.assertIn('statistics', health)
+        self.assertIn("coordinator", health)
+        self.assertIn("workers", health)
+        self.assertIn("replicas", health)
+        self.assertIn("statistics", health)
 
-        self.assertTrue(health['coordinator']['healthy'])
-        self.assertEqual(health['coordinator']['host'], self.coordinator.host)
+        self.assertTrue(health["coordinator"]["healthy"])
+        self.assertEqual(health["coordinator"]["host"], self.coordinator.host)
 
 
 class TestDistributedPoolReplicas(unittest.TestCase):
@@ -191,30 +185,29 @@ class TestDistributedPoolReplicas(unittest.TestCase):
     def setUpClass(cls):
         """Set up test database connections."""
         cls.coordinator = DatabaseNode(
-            host=os.getenv('COORDINATOR_HOST', 'localhost'),
-            port=int(os.getenv('COORDINATOR_PORT', '5432')),
-            database=os.getenv('COORDINATOR_DB', 'distributed_postgres_cluster'),
-            user=os.getenv('COORDINATOR_USER', 'dpg_cluster'),
-            password=os.getenv('COORDINATOR_PASSWORD', 'dpg_cluster_2026'),
-            role=NodeRole.COORDINATOR
+            host=os.getenv("COORDINATOR_HOST", "localhost"),
+            port=int(os.getenv("COORDINATOR_PORT", "5432")),
+            database=os.getenv("COORDINATOR_DB", "distributed_postgres_cluster"),
+            user=os.getenv("COORDINATOR_USER", "dpg_cluster"),
+            password=os.getenv("COORDINATOR_PASSWORD") or "test_password_only",
+            role=NodeRole.COORDINATOR,
         )
 
         # For testing, use same database as replica
         # In production, this would be a separate server
         cls.replica = DatabaseNode(
-            host=os.getenv('COORDINATOR_HOST', 'localhost'),
-            port=int(os.getenv('COORDINATOR_PORT', '5432')),
-            database=os.getenv('COORDINATOR_DB', 'distributed_postgres_cluster'),
-            user=os.getenv('COORDINATOR_USER', 'dpg_cluster'),
-            password=os.getenv('COORDINATOR_PASSWORD', 'dpg_cluster_2026'),
-            role=NodeRole.REPLICA
+            host=os.getenv("COORDINATOR_HOST", "localhost"),
+            port=int(os.getenv("COORDINATOR_PORT", "5432")),
+            database=os.getenv("COORDINATOR_DB", "distributed_postgres_cluster"),
+            user=os.getenv("COORDINATOR_USER", "dpg_cluster"),
+            password=os.getenv("COORDINATOR_PASSWORD") or "test_password_only",
+            role=NodeRole.REPLICA,
         )
 
     def setUp(self):
         """Create pool with replica."""
         self.pool = DistributedDatabasePool(
-            coordinator_node=self.coordinator,
-            replica_nodes=[self.replica]
+            coordinator_node=self.coordinator, replica_nodes=[self.replica]
         )
 
     def tearDown(self):
@@ -228,29 +221,31 @@ class TestDistributedPoolReplicas(unittest.TestCase):
 
     def test_read_routing_to_replica(self):
         """Test that reads are routed to replicas."""
-        initial_reads = self.pool.get_statistics()['reads']
+        initial_reads = self.pool.get_statistics()["reads"]
 
         # Perform read query
         with self.pool.cursor(QueryType.READ) as cur:
             cur.execute("SELECT 1")
 
-        final_reads = self.pool.get_statistics()['reads']
+        final_reads = self.pool.get_statistics()["reads"]
         self.assertEqual(final_reads, initial_reads + 1)
 
     def test_write_routing_to_coordinator(self):
         """Test that writes go to coordinator, not replicas."""
-        initial_writes = self.pool.get_statistics()['writes']
+        initial_writes = self.pool.get_statistics()["writes"]
 
         # Create test table
         with self.pool.cursor(QueryType.WRITE) as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS test_replica_writes (
                     id SERIAL PRIMARY KEY,
                     value TEXT
                 )
-            """)
+            """
+            )
 
-        final_writes = self.pool.get_statistics()['writes']
+        final_writes = self.pool.get_statistics()["writes"]
         self.assertGreater(final_writes, initial_writes)
 
 
@@ -261,41 +256,40 @@ class TestDistributedPoolSharding(unittest.TestCase):
     def setUpClass(cls):
         """Set up test database connections."""
         cls.coordinator = DatabaseNode(
-            host=os.getenv('COORDINATOR_HOST', 'localhost'),
-            port=int(os.getenv('COORDINATOR_PORT', '5432')),
-            database=os.getenv('COORDINATOR_DB', 'distributed_postgres_cluster'),
-            user=os.getenv('COORDINATOR_USER', 'dpg_cluster'),
-            password=os.getenv('COORDINATOR_PASSWORD', 'dpg_cluster_2026'),
-            role=NodeRole.COORDINATOR
+            host=os.getenv("COORDINATOR_HOST", "localhost"),
+            port=int(os.getenv("COORDINATOR_PORT", "5432")),
+            database=os.getenv("COORDINATOR_DB", "distributed_postgres_cluster"),
+            user=os.getenv("COORDINATOR_USER", "dpg_cluster"),
+            password=os.getenv("COORDINATOR_PASSWORD") or "test_password_only",
+            role=NodeRole.COORDINATOR,
         )
 
         # For testing, use same database as workers
         # In production, these would be separate servers
         cls.worker_0 = DatabaseNode(
-            host=os.getenv('COORDINATOR_HOST', 'localhost'),
-            port=int(os.getenv('COORDINATOR_PORT', '5432')),
-            database=os.getenv('COORDINATOR_DB', 'distributed_postgres_cluster'),
-            user=os.getenv('COORDINATOR_USER', 'dpg_cluster'),
-            password=os.getenv('COORDINATOR_PASSWORD', 'dpg_cluster_2026'),
+            host=os.getenv("COORDINATOR_HOST", "localhost"),
+            port=int(os.getenv("COORDINATOR_PORT", "5432")),
+            database=os.getenv("COORDINATOR_DB", "distributed_postgres_cluster"),
+            user=os.getenv("COORDINATOR_USER", "dpg_cluster"),
+            password=os.getenv("COORDINATOR_PASSWORD") or "test_password_only",
             role=NodeRole.WORKER,
-            shard_id=0
+            shard_id=0,
         )
 
         cls.worker_1 = DatabaseNode(
-            host=os.getenv('COORDINATOR_HOST', 'localhost'),
-            port=int(os.getenv('COORDINATOR_PORT', '5432')),
-            database=os.getenv('COORDINATOR_DB', 'distributed_postgres_cluster'),
-            user=os.getenv('COORDINATOR_USER', 'dpg_cluster'),
-            password=os.getenv('COORDINATOR_PASSWORD', 'dpg_cluster_2026'),
+            host=os.getenv("COORDINATOR_HOST", "localhost"),
+            port=int(os.getenv("COORDINATOR_PORT", "5432")),
+            database=os.getenv("COORDINATOR_DB", "distributed_postgres_cluster"),
+            user=os.getenv("COORDINATOR_USER", "dpg_cluster"),
+            password=os.getenv("COORDINATOR_PASSWORD") or "test_password_only",
             role=NodeRole.WORKER,
-            shard_id=1
+            shard_id=1,
         )
 
     def setUp(self):
         """Create pool with workers."""
         self.pool = DistributedDatabasePool(
-            coordinator_node=self.coordinator,
-            worker_nodes=[self.worker_0, self.worker_1]
+            coordinator_node=self.coordinator, worker_nodes=[self.worker_0, self.worker_1]
         )
 
     def tearDown(self):
@@ -313,12 +307,14 @@ class TestDistributedPoolSharding(unittest.TestCase):
         """Test that queries are routed based on shard key."""
         # Create test table
         with self.pool.cursor(QueryType.DDL) as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS test_sharded_data (
                     user_id BIGINT PRIMARY KEY,
                     data TEXT
                 )
-            """)
+            """
+            )
 
         # Insert with different shard keys
         test_users = [1001, 1002, 1003]
@@ -331,18 +327,15 @@ class TestDistributedPoolSharding(unittest.TestCase):
                 cur.execute(
                     "INSERT INTO test_sharded_data (user_id, data) VALUES (%s, %s) "
                     "ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data",
-                    (user_id, f"data_{user_id}")
+                    (user_id, f"data_{user_id}"),
                 )
 
         # Verify data
         for user_id in test_users:
             with self.pool.cursor(QueryType.READ, shard_key=user_id) as cur:
-                cur.execute(
-                    "SELECT * FROM test_sharded_data WHERE user_id = %s",
-                    (user_id,)
-                )
+                cur.execute("SELECT * FROM test_sharded_data WHERE user_id = %s", (user_id,))
                 result = cur.fetchone()
-                self.assertEqual(result['user_id'], user_id)
+                self.assertEqual(result["user_id"], user_id)
 
     def test_consistent_hashing(self):
         """Test that same key always maps to same shard."""
@@ -367,7 +360,7 @@ class TestDistributedPoolRetry(unittest.TestCase):
             initial_backoff=0.05,
             max_backoff=1.0,
             backoff_multiplier=2.0,
-            jitter=True
+            jitter=True,
         )
 
         self.assertEqual(retry_config.max_retries, 5)
@@ -377,22 +370,19 @@ class TestDistributedPoolRetry(unittest.TestCase):
         """Test that connection failures trigger retry."""
         # Create pool with invalid credentials
         bad_node = DatabaseNode(
-            host='localhost',
+            host="localhost",
             port=9999,  # Invalid port
-            database='nonexistent',
-            user='invalid',
-            password='invalid',
-            role=NodeRole.COORDINATOR
+            database="nonexistent",
+            user="invalid",
+            password="invalid",
+            role=NodeRole.COORDINATOR,
         )
 
         retry_config = RetryConfig(max_retries=2, initial_backoff=0.01)
 
         # Should fail after retries
         with self.assertRaises(DistributedConnectionError):
-            pool = DistributedDatabasePool(
-                coordinator_node=bad_node,
-                retry_config=retry_config
-            )
+            pool = DistributedDatabasePool(coordinator_node=bad_node, retry_config=retry_config)
 
 
 class TestDistributedPoolEnvironment(unittest.TestCase):
@@ -422,12 +412,12 @@ class TestDistributedPoolConcurrency(unittest.TestCase):
     def setUpClass(cls):
         """Set up test database connection."""
         cls.coordinator = DatabaseNode(
-            host=os.getenv('COORDINATOR_HOST', 'localhost'),
-            port=int(os.getenv('COORDINATOR_PORT', '5432')),
-            database=os.getenv('COORDINATOR_DB', 'distributed_postgres_cluster'),
-            user=os.getenv('COORDINATOR_USER', 'dpg_cluster'),
-            password=os.getenv('COORDINATOR_PASSWORD', 'dpg_cluster_2026'),
-            role=NodeRole.COORDINATOR
+            host=os.getenv("COORDINATOR_HOST", "localhost"),
+            port=int(os.getenv("COORDINATOR_PORT", "5432")),
+            database=os.getenv("COORDINATOR_DB", "distributed_postgres_cluster"),
+            user=os.getenv("COORDINATOR_USER", "dpg_cluster"),
+            password=os.getenv("COORDINATOR_PASSWORD") or "test_password_only",
+            role=NodeRole.COORDINATOR,
         )
 
     def setUp(self):
@@ -441,6 +431,7 @@ class TestDistributedPoolConcurrency(unittest.TestCase):
 
     def test_concurrent_queries(self):
         """Test multiple concurrent queries."""
+        # Standard library imports
         import threading
 
         results = []
@@ -451,7 +442,7 @@ class TestDistributedPoolConcurrency(unittest.TestCase):
                 with self.pool.cursor(QueryType.READ) as cur:
                     cur.execute("SELECT %s as id, pg_sleep(0.01)", (query_id,))
                     result = cur.fetchone()
-                    results.append(result['id'])
+                    results.append(result["id"])
             except Exception as e:
                 errors.append(e)
 

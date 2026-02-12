@@ -29,12 +29,16 @@ Example:
     ...     count = bulk_insert_memory_entries(cur, entries)
     ...     print(f"Inserted {count} entries")
 """
-from typing import List, Dict, Any, Optional, Literal
-from io import StringIO
+
+# Standard library imports
 import json
 import logging
 import time
-from psycopg2 import DatabaseError, DataError
+from io import StringIO
+from typing import Any, Dict, List, Literal, Optional
+
+# Third-party imports
+from psycopg2 import DatabaseError, DataError, sql
 
 from .vector_ops import InvalidEmbeddingError, VectorOperationError
 
@@ -42,7 +46,7 @@ from .vector_ops import InvalidEmbeddingError, VectorOperationError
 logger = logging.getLogger(__name__)
 
 
-TableType = Literal['memory_entries', 'patterns', 'trajectories']
+TableType = Literal["memory_entries", "patterns", "trajectories"]
 
 
 def _format_embedding(embedding: Optional[List[float]]) -> str:
@@ -58,12 +62,10 @@ def _format_embedding(embedding: Optional[List[float]]) -> str:
         InvalidEmbeddingError: If embedding dimensions != 384
     """
     if embedding is None:
-        return '\\N'
+        return "\\N"
 
     if len(embedding) != 384:
-        raise InvalidEmbeddingError(
-            f"Expected 384-dimensional embedding, got {len(embedding)}"
-        )
+        raise InvalidEmbeddingError(f"Expected 384-dimensional embedding, got {len(embedding)}")
 
     # Format as PostgreSQL array: [0.1,0.2,0.3]
     try:
@@ -82,12 +84,12 @@ def _format_json(data: Optional[Dict[str, Any]]) -> str:
         JSON string or '\\N' for NULL
     """
     if data is None:
-        return '\\N'
+        return "\\N"
 
     try:
         # Escape special characters for COPY protocol
         json_str = json.dumps(data)
-        return json_str.replace('\\', '\\\\').replace('\n', '\\n').replace('\t', '\\t')
+        return json_str.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t")
     except Exception as e:
         raise ValueError(f"Invalid JSON data: {e}") from e
 
@@ -102,18 +104,16 @@ def _format_array(arr: Optional[List[str]]) -> str:
         PostgreSQL array format string or '\\N' for NULL
     """
     if arr is None or len(arr) == 0:
-        return '\\N'
+        return "\\N"
 
     # Format as PostgreSQL array: {tag1,tag2,tag3}
     # Escape quotes and backslashes
-    escaped = [s.replace('\\', '\\\\').replace('"', '\\"') for s in arr]
-    return '{' + ','.join(f'"{s}"' for s in escaped) + '}'
+    escaped = [s.replace("\\", "\\\\").replace('"', '\\"') for s in arr]
+    return "{" + ",".join(f'"{s}"' for s in escaped) + "}"
 
 
 def bulk_insert_memory_entries(
-    cursor,
-    entries: List[Dict[str, Any]],
-    on_conflict: Literal['skip', 'update'] = 'skip'
+    cursor, entries: List[Dict[str, Any]], on_conflict: Literal["skip", "update"] = "skip"
 ) -> int:
     """Bulk insert memory entries using PostgreSQL COPY protocol.
 
@@ -159,14 +159,12 @@ def bulk_insert_memory_entries(
 
     # Validate all entries first
     for i, entry in enumerate(entries):
-        if not all(k in entry for k in ['namespace', 'key', 'value']):
-            raise ValueError(
-                f"Entry {i} missing required fields (namespace, key, value)"
-            )
+        if not all(k in entry for k in ["namespace", "key", "value"]):
+            raise ValueError(f"Entry {i} missing required fields (namespace, key, value)")
 
         # Validate embedding dimensions if present
-        if 'embedding' in entry and entry['embedding'] is not None:
-            if len(entry['embedding']) != 384:
+        if "embedding" in entry and entry["embedding"] is not None:
+            if len(entry["embedding"]) != 384:
                 raise InvalidEmbeddingError(
                     f"Entry {i}: Expected 384-dimensional embedding, got {len(entry['embedding'])}"
                 )
@@ -181,12 +179,12 @@ def bulk_insert_memory_entries(
         # Generate UUID for id (PostgreSQL will handle this via DEFAULT)
         # Format: namespace \t key \t value \t embedding \t metadata \t tags
 
-        namespace = entry['namespace']
-        key = entry['key']
-        value = entry['value'].replace('\\', '\\\\').replace('\n', '\\n').replace('\t', '\\t')
-        embedding = _format_embedding(entry.get('embedding'))
-        metadata = _format_json(entry.get('metadata'))
-        tags = _format_array(entry.get('tags'))
+        namespace = entry["namespace"]
+        key = entry["key"]
+        value = entry["value"].replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t")
+        embedding = _format_embedding(entry.get("embedding"))
+        metadata = _format_json(entry.get("metadata"))
+        tags = _format_array(entry.get("tags"))
 
         # Write tab-separated row
         buffer.write(f"{namespace}\t{key}\t{value}\t{embedding}\t{metadata}\t{tags}\n")
@@ -195,13 +193,15 @@ def bulk_insert_memory_entries(
     buffer.seek(0)
 
     try:
-        if on_conflict == 'skip':
+        if on_conflict == "skip":
             # Use temporary table for conflict handling
-            temp_table = f"temp_memory_entries_{int(time.time() * 1000)}"
+            temp_table_name = f"temp_memory_entries_{int(time.time() * 1000)}"
 
-            # Create temporary table
-            cursor.execute(f"""
-                CREATE TEMPORARY TABLE {temp_table} (
+            # Create temporary table using sql.Identifier for safe table name
+            cursor.execute(
+                sql.SQL(
+                    """
+                CREATE TEMPORARY TABLE {} (
                     namespace TEXT,
                     key TEXT,
                     value TEXT,
@@ -209,33 +209,41 @@ def bulk_insert_memory_entries(
                     metadata JSONB,
                     tags TEXT[]
                 ) ON COMMIT DROP
-            """)
+            """
+                ).format(sql.Identifier(temp_table_name))
+            )
 
             # COPY into temporary table
             cursor.copy_from(
                 buffer,
-                temp_table,
-                columns=('namespace', 'key', 'value', 'embedding', 'metadata', 'tags'),
-                null='\\N'
+                temp_table_name,
+                columns=("namespace", "key", "value", "embedding", "metadata", "tags"),
+                null="\\N",
             )
 
             # Insert from temp table, skipping conflicts
-            cursor.execute(f"""
+            cursor.execute(
+                sql.SQL(
+                    """
                 INSERT INTO memory_entries (namespace, key, value, embedding, metadata, tags)
                 SELECT namespace, key, value, embedding, metadata, tags
-                FROM {temp_table}
+                FROM {}
                 ON CONFLICT (namespace, key) DO NOTHING
-            """)
+            """
+                ).format(sql.Identifier(temp_table_name))
+            )
 
             inserted_count = cursor.rowcount
 
-        elif on_conflict == 'update':
+        elif on_conflict == "update":
             # Use temporary table for conflict handling
-            temp_table = f"temp_memory_entries_{int(time.time() * 1000)}"
+            temp_table_name = f"temp_memory_entries_{int(time.time() * 1000)}"
 
-            # Create temporary table
-            cursor.execute(f"""
-                CREATE TEMPORARY TABLE {temp_table} (
+            # Create temporary table using sql.Identifier for safe table name
+            cursor.execute(
+                sql.SQL(
+                    """
+                CREATE TEMPORARY TABLE {} (
                     namespace TEXT,
                     key TEXT,
                     value TEXT,
@@ -243,28 +251,34 @@ def bulk_insert_memory_entries(
                     metadata JSONB,
                     tags TEXT[]
                 ) ON COMMIT DROP
-            """)
+            """
+                ).format(sql.Identifier(temp_table_name))
+            )
 
             # COPY into temporary table
             cursor.copy_from(
                 buffer,
-                temp_table,
-                columns=('namespace', 'key', 'value', 'embedding', 'metadata', 'tags'),
-                null='\\N'
+                temp_table_name,
+                columns=("namespace", "key", "value", "embedding", "metadata", "tags"),
+                null="\\N",
             )
 
             # Insert from temp table, updating on conflict
-            cursor.execute(f"""
+            cursor.execute(
+                sql.SQL(
+                    """
                 INSERT INTO memory_entries (namespace, key, value, embedding, metadata, tags)
                 SELECT namespace, key, value, embedding, metadata, tags
-                FROM {temp_table}
+                FROM {}
                 ON CONFLICT (namespace, key) DO UPDATE
                 SET value = EXCLUDED.value,
                     embedding = EXCLUDED.embedding,
                     metadata = EXCLUDED.metadata,
                     tags = EXCLUDED.tags,
                     updated_at = NOW()
-            """)
+            """
+                ).format(sql.Identifier(temp_table_name))
+            )
 
             inserted_count = cursor.rowcount
 
@@ -293,9 +307,7 @@ def bulk_insert_memory_entries(
 
 
 def bulk_insert_patterns(
-    cursor,
-    patterns: List[Dict[str, Any]],
-    on_conflict: Literal['skip', 'update'] = 'skip'
+    cursor, patterns: List[Dict[str, Any]], on_conflict: Literal["skip", "update"] = "skip"
 ) -> int:
     """Bulk insert pattern entries using PostgreSQL COPY protocol.
 
@@ -325,13 +337,11 @@ def bulk_insert_patterns(
 
     # Validate all patterns first
     for i, pattern in enumerate(patterns):
-        if not all(k in pattern for k in ['name', 'pattern_type']):
-            raise ValueError(
-                f"Pattern {i} missing required fields (name, pattern_type)"
-            )
+        if not all(k in pattern for k in ["name", "pattern_type"]):
+            raise ValueError(f"Pattern {i} missing required fields (name, pattern_type)")
 
-        if 'embedding' in pattern and pattern['embedding'] is not None:
-            if len(pattern['embedding']) != 384:
+        if "embedding" in pattern and pattern["embedding"] is not None:
+            if len(pattern["embedding"]) != 384:
                 raise InvalidEmbeddingError(
                     f"Pattern {i}: Expected 384-dimensional embedding, got {len(pattern['embedding'])}"
                 )
@@ -341,14 +351,21 @@ def bulk_insert_patterns(
 
     # Format: name \t pattern_type \t description \t embedding \t confidence \t usage_count \t success_count \t metadata
     for pattern in patterns:
-        name = pattern['name']
-        pattern_type = pattern['pattern_type']
-        description = pattern.get('description', '').replace('\\', '\\\\').replace('\n', '\\n').replace('\t', '\\t') if pattern.get('description') else '\\N'
-        embedding = _format_embedding(pattern.get('embedding'))
-        confidence = pattern.get('confidence', 0.5)
-        usage_count = pattern.get('usage_count', 0)
-        success_count = pattern.get('success_count', 0)
-        metadata = _format_json(pattern.get('metadata'))
+        name = pattern["name"]
+        pattern_type = pattern["pattern_type"]
+        description = (
+            pattern.get("description", "")
+            .replace("\\", "\\\\")
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+            if pattern.get("description")
+            else "\\N"
+        )
+        embedding = _format_embedding(pattern.get("embedding"))
+        confidence = pattern.get("confidence", 0.5)
+        usage_count = pattern.get("usage_count", 0)
+        success_count = pattern.get("success_count", 0)
+        metadata = _format_json(pattern.get("metadata"))
 
         buffer.write(
             f"{name}\t{pattern_type}\t{description}\t{embedding}\t{confidence}\t{usage_count}\t{success_count}\t{metadata}\n"
@@ -357,11 +374,13 @@ def bulk_insert_patterns(
     buffer.seek(0)
 
     try:
-        temp_table = f"temp_patterns_{int(time.time() * 1000)}"
+        temp_table_name = f"temp_patterns_{int(time.time() * 1000)}"
 
         # Create temporary table matching patterns schema
-        cursor.execute(f"""
-            CREATE TEMPORARY TABLE {temp_table} (
+        cursor.execute(
+            sql.SQL(
+                """
+            CREATE TEMPORARY TABLE {} (
                 name TEXT,
                 pattern_type TEXT,
                 description TEXT,
@@ -371,29 +390,46 @@ def bulk_insert_patterns(
                 success_count INTEGER,
                 metadata JSONB
             ) ON COMMIT DROP
-        """)
+        """
+            ).format(sql.Identifier(temp_table_name))
+        )
 
         # COPY into temporary table
         cursor.copy_from(
             buffer,
-            temp_table,
-            columns=('name', 'pattern_type', 'description', 'embedding', 'confidence', 'usage_count', 'success_count', 'metadata'),
-            null='\\N'
+            temp_table_name,
+            columns=(
+                "name",
+                "pattern_type",
+                "description",
+                "embedding",
+                "confidence",
+                "usage_count",
+                "success_count",
+                "metadata",
+            ),
+            null="\\N",
         )
 
         # Insert from temp table
-        if on_conflict == 'skip':
-            cursor.execute(f"""
+        if on_conflict == "skip":
+            cursor.execute(
+                sql.SQL(
+                    """
                 INSERT INTO patterns (name, pattern_type, description, embedding, confidence, usage_count, success_count, metadata)
                 SELECT name, pattern_type, description, embedding, confidence, usage_count, success_count, metadata
-                FROM {temp_table}
+                FROM {}
                 ON CONFLICT (name, pattern_type) DO NOTHING
-            """)
+            """
+                ).format(sql.Identifier(temp_table_name))
+            )
         else:  # update
-            cursor.execute(f"""
+            cursor.execute(
+                sql.SQL(
+                    """
                 INSERT INTO patterns (name, pattern_type, description, embedding, confidence, usage_count, success_count, metadata)
                 SELECT name, pattern_type, description, embedding, confidence, usage_count, success_count, metadata
-                FROM {temp_table}
+                FROM {}
                 ON CONFLICT (name, pattern_type) DO UPDATE
                 SET description = EXCLUDED.description,
                     embedding = EXCLUDED.embedding,
@@ -402,7 +438,9 @@ def bulk_insert_patterns(
                     success_count = patterns.success_count + EXCLUDED.success_count,
                     metadata = EXCLUDED.metadata,
                     updated_at = NOW()
-            """)
+            """
+                ).format(sql.Identifier(temp_table_name))
+            )
 
         inserted_count = cursor.rowcount
         elapsed = time.time() - start_time
@@ -421,9 +459,7 @@ def bulk_insert_patterns(
 
 
 def bulk_insert_trajectories(
-    cursor,
-    trajectories: List[Dict[str, Any]],
-    on_conflict: Literal['skip', 'update'] = 'skip'
+    cursor, trajectories: List[Dict[str, Any]], on_conflict: Literal["skip", "update"] = "skip"
 ) -> int:
     """Bulk insert trajectory entries using PostgreSQL COPY protocol.
 
@@ -452,14 +488,12 @@ def bulk_insert_trajectories(
 
     # Validate all trajectories first
     for i, traj in enumerate(trajectories):
-        required = ['trajectory_id', 'step_number', 'action']
+        required = ["trajectory_id", "step_number", "action"]
         if not all(k in traj for k in required):
-            raise ValueError(
-                f"Trajectory {i} missing required fields: {required}"
-            )
+            raise ValueError(f"Trajectory {i} missing required fields: {required}")
 
-        if 'embedding' in traj and traj['embedding'] is not None:
-            if len(traj['embedding']) != 384:
+        if "embedding" in traj and traj["embedding"] is not None:
+            if len(traj["embedding"]) != 384:
                 raise InvalidEmbeddingError(
                     f"Trajectory {i}: Expected 384-dimensional embedding, got {len(traj['embedding'])}"
                 )
@@ -469,13 +503,13 @@ def bulk_insert_trajectories(
 
     # Format: trajectory_id \t step_number \t action \t state \t reward \t embedding \t metadata
     for traj in trajectories:
-        trajectory_id = traj['trajectory_id']
-        step_number = traj['step_number']
-        action = traj['action'].replace('\\', '\\\\').replace('\n', '\\n').replace('\t', '\\t')
-        state = _format_json(traj.get('state'))
-        reward = str(traj.get('reward', 0.0))
-        embedding = _format_embedding(traj.get('embedding'))
-        metadata = _format_json(traj.get('metadata'))
+        trajectory_id = traj["trajectory_id"]
+        step_number = traj["step_number"]
+        action = traj["action"].replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t")
+        state = _format_json(traj.get("state"))
+        reward = str(traj.get("reward", 0.0))
+        embedding = _format_embedding(traj.get("embedding"))
+        metadata = _format_json(traj.get("metadata"))
 
         buffer.write(
             f"{trajectory_id}\t{step_number}\t{action}\t{state}\t{reward}\t{embedding}\t{metadata}\n"
@@ -484,11 +518,13 @@ def bulk_insert_trajectories(
     buffer.seek(0)
 
     try:
-        temp_table = f"temp_trajectories_{int(time.time() * 1000)}"
+        temp_table_name = f"temp_trajectories_{int(time.time() * 1000)}"
 
         # Create temporary table matching trajectories schema
-        cursor.execute(f"""
-            CREATE TEMPORARY TABLE {temp_table} (
+        cursor.execute(
+            sql.SQL(
+                """
+            CREATE TEMPORARY TABLE {} (
                 trajectory_id TEXT,
                 step_number INTEGER,
                 action TEXT,
@@ -497,36 +533,54 @@ def bulk_insert_trajectories(
                 embedding ruvector(384),
                 metadata JSONB
             ) ON COMMIT DROP
-        """)
+        """
+            ).format(sql.Identifier(temp_table_name))
+        )
 
         # COPY into temporary table
         cursor.copy_from(
             buffer,
-            temp_table,
-            columns=('trajectory_id', 'step_number', 'action', 'state', 'reward', 'embedding', 'metadata'),
-            null='\\N'
+            temp_table_name,
+            columns=(
+                "trajectory_id",
+                "step_number",
+                "action",
+                "state",
+                "reward",
+                "embedding",
+                "metadata",
+            ),
+            null="\\N",
         )
 
         # Insert from temp table
-        if on_conflict == 'skip':
-            cursor.execute(f"""
+        if on_conflict == "skip":
+            cursor.execute(
+                sql.SQL(
+                    """
                 INSERT INTO trajectories (trajectory_id, step_number, action, state, reward, embedding, metadata)
                 SELECT trajectory_id, step_number, action, state, reward, embedding, metadata
-                FROM {temp_table}
+                FROM {}
                 ON CONFLICT (trajectory_id, step_number) DO NOTHING
-            """)
+            """
+                ).format(sql.Identifier(temp_table_name))
+            )
         else:  # update
-            cursor.execute(f"""
+            cursor.execute(
+                sql.SQL(
+                    """
                 INSERT INTO trajectories (trajectory_id, step_number, action, state, reward, embedding, metadata)
                 SELECT trajectory_id, step_number, action, state, reward, embedding, metadata
-                FROM {temp_table}
+                FROM {}
                 ON CONFLICT (trajectory_id, step_number) DO UPDATE
                 SET action = EXCLUDED.action,
                     state = EXCLUDED.state,
                     reward = EXCLUDED.reward,
                     embedding = EXCLUDED.embedding,
                     metadata = EXCLUDED.metadata
-            """)
+            """
+                ).format(sql.Identifier(temp_table_name))
+            )
 
         inserted_count = cursor.rowcount
         elapsed = time.time() - start_time

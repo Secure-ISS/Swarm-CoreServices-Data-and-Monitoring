@@ -1,0 +1,518 @@
+// Jenkins Pipeline for Distributed PostgreSQL Cluster
+// Rename to Jenkinsfile to use with Jenkins
+
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        disableConcurrentBuilds()
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+    }
+
+    environment {
+        DOCKER_IMAGE = "dpg-cluster"
+        DOCKER_TAG = "${BUILD_NUMBER}"
+        REGISTRY = "ghcr.io/myorg"
+        PYTHON_VERSION = "3.11"
+        DATABASE_URL = credentials('database-url')
+        SLACK_CHANNEL = '#deployments'
+    }
+
+    stages {
+        // ================================================================
+        // STAGE: CHECKOUT
+        // ================================================================
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(
+                        script: "git rev-parse --short HEAD",
+                        returnStdout: true
+                    ).trim()
+                }
+            }
+        }
+
+        // ================================================================
+        // STAGE: CODE QUALITY
+        // ================================================================
+        stage('Code Quality') {
+            parallel {
+                stage('Formatting') {
+                    agent {
+                        docker {
+                            image "python:${PYTHON_VERSION}"
+                            reuseNode true
+                        }
+                    }
+                    steps {
+                        sh '''
+                            pip install black isort
+                            black --check src/ tests/
+                            isort --check-only src/ tests/
+                        '''
+                    }
+                }
+
+                stage('Linting') {
+                    agent {
+                        docker {
+                            image "python:${PYTHON_VERSION}"
+                            reuseNode true
+                        }
+                    }
+                    steps {
+                        sh '''
+                            pip install flake8 pylint
+                            flake8 src/ tests/ --max-line-length=120
+                            pylint src/ --fail-under=8.0 || true
+                        '''
+                    }
+                }
+
+                stage('Type Checking') {
+                    agent {
+                        docker {
+                            image "python:${PYTHON_VERSION}"
+                            reuseNode true
+                        }
+                    }
+                    steps {
+                        sh '''
+                            pip install mypy
+                            mypy src/ --ignore-missing-imports
+                        '''
+                    }
+                }
+            }
+        }
+
+        // ================================================================
+        // STAGE: SECURITY SCANNING
+        // ================================================================
+        stage('Security Scan') {
+            parallel {
+                stage('Dependency Check') {
+                    agent {
+                        docker {
+                            image "python:${PYTHON_VERSION}"
+                            reuseNode true
+                        }
+                    }
+                    steps {
+                        sh '''
+                            pip install safety
+                            safety check --json || true
+                        '''
+                    }
+                }
+
+                stage('Code Security') {
+                    agent {
+                        docker {
+                            image "python:${PYTHON_VERSION}"
+                            reuseNode true
+                        }
+                    }
+                    steps {
+                        sh '''
+                            pip install bandit
+                            bandit -r src/ -f json -o bandit-report.json
+                        '''
+                        archiveArtifacts artifacts: 'bandit-report.json', fingerprint: true
+                    }
+                }
+
+                stage('Secret Scan') {
+                    steps {
+                        sh '''
+                            if grep -rn -E "password\\s*=\\s*['\\\"].*['\\\"]" src/; then
+                                echo "ERROR: Potential secrets found"
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+
+        // ================================================================
+        // STAGE: UNIT TESTS
+        // ================================================================
+        stage('Unit Tests') {
+            agent {
+                docker {
+                    image "python:${PYTHON_VERSION}"
+                    reuseNode true
+                }
+            }
+            steps {
+                sh '''
+                    pip install -r requirements.txt -r requirements-dev.txt
+                    pytest tests/unit/ \
+                        --cov=src \
+                        --cov-report=term \
+                        --cov-report=xml \
+                        --cov-report=html \
+                        --junitxml=junit-unit.xml
+                '''
+            }
+            post {
+                always {
+                    junit 'junit-unit.xml'
+                    publishHTML([
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'htmlcov',
+                        reportFiles: 'index.html',
+                        reportName: 'Coverage Report'
+                    ])
+                }
+            }
+        }
+
+        // ================================================================
+        // STAGE: INTEGRATION TESTS
+        // ================================================================
+        stage('Integration Tests') {
+            agent {
+                docker {
+                    image "python:${PYTHON_VERSION}"
+                    reuseNode true
+                }
+            }
+            steps {
+                script {
+                    // Start test services
+                    sh '''
+                        docker-compose -f docker-compose.test.yml up -d postgres redis
+                        sleep 10
+                    '''
+
+                    try {
+                        sh '''
+                            pip install -r requirements.txt -r requirements-dev.txt
+                            python scripts/init_database.py
+                            pytest tests/integration/ \
+                                --cov=src \
+                                --cov-report=xml \
+                                --junitxml=junit-integration.xml
+                        '''
+                    } finally {
+                        sh 'docker-compose -f docker-compose.test.yml down -v'
+                    }
+                }
+            }
+            post {
+                always {
+                    junit 'junit-integration.xml'
+                }
+            }
+        }
+
+        // ================================================================
+        // STAGE: E2E TESTS
+        // ================================================================
+        stage('E2E Tests') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                }
+            }
+            steps {
+                script {
+                    sh '''
+                        docker-compose -f docker-compose.test.yml up -d
+                        sleep 30
+                    '''
+
+                    try {
+                        sh '''
+                            docker-compose -f docker-compose.test.yml exec -T api \
+                                pytest tests/e2e/ -v --junitxml=junit-e2e.xml
+                        '''
+                    } finally {
+                        sh 'docker-compose -f docker-compose.test.yml logs > e2e-logs.txt'
+                        sh 'docker-compose -f docker-compose.test.yml down -v'
+                        archiveArtifacts artifacts: 'e2e-logs.txt', fingerprint: true
+                    }
+                }
+            }
+            post {
+                always {
+                    junit 'junit-e2e.xml'
+                }
+            }
+        }
+
+        // ================================================================
+        // STAGE: PERFORMANCE TESTS
+        // ================================================================
+        stage('Performance Tests') {
+            agent {
+                docker {
+                    image "python:${PYTHON_VERSION}"
+                    reuseNode true
+                }
+            }
+            steps {
+                sh '''
+                    pip install -r requirements.txt pytest-benchmark locust
+                    pytest tests/performance/ \
+                        --benchmark-only \
+                        --benchmark-json=benchmark.json
+                    python scripts/ci/check_performance_regression.py \
+                        --current benchmark.json \
+                        --baseline performance-baseline.json \
+                        --threshold 10 || true
+                '''
+                archiveArtifacts artifacts: 'benchmark.json', fingerprint: true
+            }
+        }
+
+        // ================================================================
+        // STAGE: BUILD DOCKER IMAGE
+        // ================================================================
+        stage('Build') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                }
+            }
+            steps {
+                script {
+                    docker.withRegistry("https://${REGISTRY}", 'ghcr-credentials') {
+                        def app = docker.build(
+                            "${REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}",
+                            "-f docker/Dockerfile.api --build-arg VERSION=${GIT_COMMIT_SHORT} ."
+                        )
+                        app.push()
+                        app.push('latest')
+                    }
+                }
+            }
+        }
+
+        // ================================================================
+        // STAGE: IMAGE SECURITY SCAN
+        // ================================================================
+        stage('Image Security Scan') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                }
+            }
+            steps {
+                sh """
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy:latest image \
+                        --severity HIGH,CRITICAL \
+                        --format json \
+                        --output trivy-report.json \
+                        ${REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
+                """
+                archiveArtifacts artifacts: 'trivy-report.json', fingerprint: true
+            }
+        }
+
+        // ================================================================
+        // STAGE: DEPLOY TO STAGING
+        // ================================================================
+        stage('Deploy to Staging') {
+            when {
+                branch 'develop'
+            }
+            environment {
+                KUBE_CONTEXT = 'staging'
+            }
+            steps {
+                script {
+                    sh """
+                        kubectl config use-context ${KUBE_CONTEXT}
+                        kubectl set image deployment/dpg-api \
+                            api=${REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} \
+                            -n staging
+                        kubectl rollout status deployment/dpg-api -n staging
+                    """
+
+                    // Run smoke tests
+                    sh '''
+                        python scripts/ci/smoke_tests.py \
+                            --url https://staging.dpg-cluster.example.com \
+                            --timeout 300
+                    '''
+                }
+            }
+        }
+
+        // ================================================================
+        // STAGE: DEPLOY TO PRODUCTION
+        // ================================================================
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            environment {
+                KUBE_CONTEXT = 'production'
+            }
+            steps {
+                script {
+                    // Manual approval
+                    input message: 'Deploy to production?', ok: 'Deploy'
+
+                    // Blue-Green deployment
+                    sh '''
+                        kubectl config use-context ${KUBE_CONTEXT}
+
+                        # Determine current/new environments
+                        CURRENT=$(kubectl get service dpg-api -n production -o jsonpath='{.spec.selector.version}')
+                        NEW=$([ "$CURRENT" == "blue" ] && echo "green" || echo "blue")
+
+                        echo "Deploying to: $NEW (current: $CURRENT)"
+
+                        # Deploy to new environment
+                        kubectl set image deployment/dpg-api-$NEW \
+                            api=${REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} \
+                            -n production
+
+                        kubectl rollout status deployment/dpg-api-$NEW -n production
+
+                        # Switch traffic
+                        kubectl patch service dpg-api -n production \
+                            -p "{\\"spec\\":{\\"selector\\":{\\"version\\":\\"$NEW\\"}}}"
+
+                        # Wait and monitor
+                        sleep 60
+
+                        # Run smoke tests
+                        python scripts/ci/smoke_tests.py \
+                            --url https://dpg-cluster.example.com \
+                            --timeout 300 \
+                            --critical
+                    '''
+                }
+            }
+            post {
+                failure {
+                    script {
+                        // Rollback on failure
+                        sh '''
+                            CURRENT=$(kubectl get service dpg-api -n production -o jsonpath='{.spec.selector.version}')
+                            PREVIOUS=$([ "$CURRENT" == "blue" ] && echo "green" || echo "blue")
+
+                            echo "Rolling back to: $PREVIOUS"
+
+                            kubectl patch service dpg-api -n production \
+                                -p "{\\"spec\\":{\\"selector\\":{\\"version\\":\\"$PREVIOUS\\"}}}"
+                        '''
+                    }
+                }
+            }
+        }
+
+        // ================================================================
+        // STAGE: DATABASE MIGRATION
+        // ================================================================
+        stage('Database Migration') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                }
+            }
+            steps {
+                input message: 'Run database migration?', ok: 'Run'
+
+                script {
+                    def env_name = env.BRANCH_NAME == 'main' ? 'production' : 'staging'
+
+                    sh """
+                        # Create backup
+                        pg_dump "${DATABASE_URL}" > backup-\$(date +%Y%m%d-%H%M%S).sql
+
+                        # Run migration
+                        pip install alembic psycopg2-binary
+                        alembic upgrade head
+
+                        # Validate
+                        python scripts/ci/validate_schema.py \
+                            --expected-schema schema/expected_schema.yaml
+                    """
+                }
+            }
+        }
+    }
+
+    // ====================================================================
+    // POST-BUILD ACTIONS
+    // ====================================================================
+    post {
+        always {
+            // Clean up
+            sh 'docker-compose -f docker-compose.test.yml down -v || true'
+            cleanWs()
+        }
+
+        success {
+            slackSend(
+                channel: env.SLACK_CHANNEL,
+                color: 'good',
+                message: """
+                    ✅ Build Successful
+                    Job: ${env.JOB_NAME}
+                    Build: ${env.BUILD_NUMBER}
+                    Branch: ${env.BRANCH_NAME}
+                    Commit: ${env.GIT_COMMIT_SHORT}
+                """
+            )
+
+            // Create GitHub release for main branch
+            script {
+                if (env.BRANCH_NAME == 'main') {
+                    sh """
+                        gh release create v${BUILD_NUMBER} \
+                            --title "Release v${BUILD_NUMBER}" \
+                            --notes "Automated release from Jenkins" \
+                            --target main
+                    """
+                }
+            }
+        }
+
+        failure {
+            slackSend(
+                channel: env.SLACK_CHANNEL,
+                color: 'danger',
+                message: """
+                    ❌ Build Failed
+                    Job: ${env.JOB_NAME}
+                    Build: ${env.BUILD_NUMBER}
+                    Branch: ${env.BRANCH_NAME}
+                    Commit: ${env.GIT_COMMIT_SHORT}
+                    Logs: ${env.BUILD_URL}console
+                """
+            )
+        }
+
+        unstable {
+            slackSend(
+                channel: env.SLACK_CHANNEL,
+                color: 'warning',
+                message: """
+                    ⚠️ Build Unstable
+                    Job: ${env.JOB_NAME}
+                    Build: ${env.BUILD_NUMBER}
+                    Branch: ${env.BRANCH_NAME}
+                """
+            )
+        }
+    }
+}

@@ -1,0 +1,328 @@
+version: '3.9'
+
+# Citus Distributed PostgreSQL Cluster
+# Architecture: 1 Coordinator + 2 Workers with RuVector support
+# Designed for development/testing with horizontal sharding
+
+networks:
+  citus-net:
+    driver: bridge
+    name: citus-cluster-network
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  citus-coordinator-data:
+    driver: local
+    name: citus-coordinator-data
+  citus-worker-1-data:
+    driver: local
+    name: citus-worker-1-data
+  citus-worker-2-data:
+    driver: local
+    name: citus-worker-2-data
+  redis-cache-data:
+    driver: local
+    name: citus-redis-data
+
+services:
+  # ============================================================
+  # Citus Coordinator Node (with RuVector extension)
+  # ============================================================
+  citus-coordinator:
+    image: ruvnet/ruvector-postgres:latest
+    container_name: citus-coordinator
+    hostname: citus-coordinator
+    networks:
+      citus-net:
+        ipv4_address: 172.20.0.10
+
+    environment:
+      # Database credentials
+      - POSTGRES_USER=${POSTGRES_USER:-dpg_cluster}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dpg_cluster_2026}
+      - POSTGRES_DB=${POSTGRES_DB:-distributed_postgres_cluster}
+
+      # Citus coordinator settings
+      - CITUS_ROLE=coordinator
+      - PGDATA=/var/lib/postgresql/data
+
+      # Memory settings (coordinator - lighter workload)
+      - POSTGRES_SHARED_BUFFERS=512MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=1536MB
+      - POSTGRES_WORK_MEM=32MB
+      - POSTGRES_MAINTENANCE_WORK_MEM=256MB
+
+      # Connection settings
+      - POSTGRES_MAX_CONNECTIONS=100
+
+      # RuVector settings
+      - RUVECTOR_ENABLE_HNSW=on
+      - RUVECTOR_HNSW_M=16
+      - RUVECTOR_HNSW_EF_CONSTRUCTION=100
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - citus-coordinator-data:/var/lib/postgresql/data
+      - ../../scripts/citus:/docker-entrypoint-initdb.d:ro
+      - ../../config/citus:/etc/citus:ro
+
+    networks:
+      - citus-net
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dpg_cluster} -d ${POSTGRES_DB:-distributed_postgres_cluster}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    restart: unless-stopped
+
+    command: >
+      postgres
+      -c shared_preload_libraries='citus,ruvector'
+      -c shared_buffers=512MB
+      -c effective_cache_size=1536MB
+      -c work_mem=32MB
+      -c maintenance_work_mem=256MB
+      -c max_connections=100
+      -c listen_addresses='*'
+      -c wal_level=logical
+      -c max_wal_senders=10
+      -c max_replication_slots=10
+      -c hot_standby=on
+      -c log_statement=all
+      -c log_line_prefix='%m [%p] %q%u@%d '
+
+  # ============================================================
+  # Citus Worker Node 1 (Shard Group 1)
+  # ============================================================
+  citus-worker-1:
+    image: ruvnet/ruvector-postgres:latest
+    container_name: citus-worker-1
+    hostname: citus-worker-1
+    networks:
+      citus-net:
+        ipv4_address: 172.20.0.11
+
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-dpg_cluster}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dpg_cluster_2026}
+      - POSTGRES_DB=${POSTGRES_DB:-distributed_postgres_cluster}
+      - CITUS_ROLE=worker
+      - PGDATA=/var/lib/postgresql/data
+
+      # Memory settings (workers handle more data)
+      - POSTGRES_SHARED_BUFFERS=1GB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=3GB
+      - POSTGRES_WORK_MEM=64MB
+      - POSTGRES_MAINTENANCE_WORK_MEM=512MB
+      - POSTGRES_MAX_CONNECTIONS=200
+
+      # RuVector settings
+      - RUVECTOR_ENABLE_HNSW=on
+      - RUVECTOR_HNSW_M=16
+      - RUVECTOR_HNSW_EF_CONSTRUCTION=100
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - citus-worker-1-data:/var/lib/postgresql/data
+      - ../../scripts/citus:/docker-entrypoint-initdb.d:ro
+
+    networks:
+      - citus-net
+
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dpg_cluster}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    restart: unless-stopped
+
+    command: >
+      postgres
+      -c shared_preload_libraries='citus,ruvector'
+      -c shared_buffers=1GB
+      -c effective_cache_size=3GB
+      -c work_mem=64MB
+      -c maintenance_work_mem=512MB
+      -c max_connections=200
+      -c listen_addresses='*'
+
+  # ============================================================
+  # Citus Worker Node 2 (Shard Group 2)
+  # ============================================================
+  citus-worker-2:
+    image: ruvnet/ruvector-postgres:latest
+    container_name: citus-worker-2
+    hostname: citus-worker-2
+    networks:
+      citus-net:
+        ipv4_address: 172.20.0.12
+
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-dpg_cluster}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dpg_cluster_2026}
+      - POSTGRES_DB=${POSTGRES_DB:-distributed_postgres_cluster}
+      - CITUS_ROLE=worker
+      - PGDATA=/var/lib/postgresql/data
+      - POSTGRES_SHARED_BUFFERS=1GB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=3GB
+      - POSTGRES_WORK_MEM=64MB
+      - POSTGRES_MAINTENANCE_WORK_MEM=512MB
+      - POSTGRES_MAX_CONNECTIONS=200
+      - RUVECTOR_ENABLE_HNSW=on
+      - RUVECTOR_HNSW_M=16
+      - RUVECTOR_HNSW_EF_CONSTRUCTION=100
+
+    ports:
+      - "5434:5432"
+
+    volumes:
+      - citus-worker-2-data:/var/lib/postgresql/data
+      - ../../scripts/citus:/docker-entrypoint-initdb.d:ro
+
+    networks:
+      - citus-net
+
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dpg_cluster}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    restart: unless-stopped
+
+    command: >
+      postgres
+      -c shared_preload_libraries='citus,ruvector'
+      -c shared_buffers=1GB
+      -c effective_cache_size=3GB
+      -c work_mem=64MB
+      -c maintenance_work_mem=512MB
+      -c max_connections=200
+      -c listen_addresses='*'
+
+  # ============================================================
+  # Redis Cache (Query caching for distributed queries)
+  # ============================================================
+  redis-cache:
+    image: redis:7-alpine
+    container_name: citus-redis-cache
+    hostname: redis-cache
+    networks:
+      citus-net:
+        ipv4_address: 172.20.0.20
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - redis-cache-data:/data
+
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+    command: >
+      redis-server
+      --maxmemory 400mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+      --appendfsync everysec
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+    restart: unless-stopped
+
+  # ============================================================
+  # PgAdmin (Optional - Web UI for cluster management)
+  # ============================================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: citus-pgadmin
+    hostname: pgadmin
+    networks:
+      citus-net:
+        ipv4_address: 172.20.0.30
+
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@citus.local}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+
+    ports:
+      - "8080:80"
+
+    volumes:
+      - ./pgadmin-servers.json:/pgadmin4/servers.json:ro
+
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+    depends_on:
+      citus-coordinator:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+    profiles:
+      - tools
+
+# Usage:
+# Start cluster (1 coordinator + 2 workers): docker compose -f docker/citus/docker-compose.yml up -d
+# Start with PgAdmin: docker compose -f docker/citus/docker-compose.yml --profile tools up -d
+# Stop cluster: docker compose -f docker/citus/docker-compose.yml down
+# Clean all data: docker compose -f docker/citus/docker-compose.yml down -v
+# View logs: docker compose -f docker/citus/docker-compose.yml logs -f citus-coordinator

@@ -4,18 +4,20 @@ Provides comprehensive security event logging for audit trails and
 compliance requirements.
 """
 
-import logging
+# Standard library imports
 import json
-from enum import Enum
-from typing import Dict, Any, Optional
+import logging
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from dataclasses import dataclass, asdict, field
+from enum import Enum
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class SecurityEventType(Enum):
     """Types of security events."""
+
     # Authentication
     AUTH_SUCCESS = "auth_success"
     AUTH_FAILURE = "auth_failure"
@@ -56,6 +58,7 @@ class SecurityEventType(Enum):
 
 class SecurityEventSeverity(Enum):
     """Severity levels for security events."""
+
     DEBUG = "debug"
     INFO = "info"
     WARNING = "warning"
@@ -66,6 +69,7 @@ class SecurityEventSeverity(Enum):
 @dataclass
 class SecurityEvent:
     """Represents a security event."""
+
     event_type: SecurityEventType
     severity: SecurityEventSeverity
     timestamp: datetime
@@ -80,9 +84,9 @@ class SecurityEvent:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary with JSON-serializable values."""
         data = asdict(self)
-        data['event_type'] = self.event_type.value
-        data['severity'] = self.severity.value
-        data['timestamp'] = self.timestamp.isoformat()
+        data["event_type"] = self.event_type.value
+        data["severity"] = self.severity.value
+        data["timestamp"] = self.timestamp.isoformat()
         return data
 
     def to_json(self) -> str:
@@ -105,7 +109,7 @@ class SecurityAuditor:
         self,
         logger_name: str = "security_audit",
         min_severity: SecurityEventSeverity = SecurityEventSeverity.INFO,
-        output_format: str = "json"
+        output_format: str = "json",
     ):
         """Initialize security auditor.
 
@@ -121,9 +125,7 @@ class SecurityAuditor:
         # Configure audit logger
         if not self.audit_logger.handlers:
             handler = logging.StreamHandler()
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            )
+            formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
             handler.setFormatter(formatter)
             self.audit_logger.addHandler(handler)
             self.audit_logger.setLevel(logging.INFO)
@@ -157,10 +159,7 @@ class SecurityAuditor:
         self.audit_logger.log(log_level, message)
 
     def log_auth_success(
-        self,
-        user: str,
-        source_ip: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        self, user: str, source_ip: Optional[str] = None, details: Optional[Dict[str, Any]] = None
     ) -> None:
         """Log successful authentication."""
         event = SecurityEvent(
@@ -171,7 +170,7 @@ class SecurityAuditor:
             source_ip=source_ip,
             action="authenticate",
             result="success",
-            details=details or {}
+            details=details or {},
         )
         self.log_event(event)
 
@@ -180,7 +179,7 @@ class SecurityAuditor:
         user: str,
         source_ip: Optional[str] = None,
         reason: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Log failed authentication."""
         event = SecurityEvent(
@@ -191,10 +190,10 @@ class SecurityAuditor:
             source_ip=source_ip,
             action="authenticate",
             result="failure",
-            details=details or {}
+            details=details or {},
         )
         if reason:
-            event.details['reason'] = reason
+            event.details["reason"] = reason
         self.log_event(event)
 
     def log_authz_denied(
@@ -203,7 +202,7 @@ class SecurityAuditor:
         resource: str,
         action: str,
         reason: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Log authorization denial."""
         event = SecurityEvent(
@@ -214,10 +213,10 @@ class SecurityAuditor:
             resource=resource,
             action=action,
             result="denied",
-            details=details or {}
+            details=details or {},
         )
         if reason:
-            event.details['reason'] = reason
+            event.details["reason"] = reason
         self.log_event(event)
 
     def log_sql_injection_attempt(
@@ -225,7 +224,7 @@ class SecurityAuditor:
         user: Optional[str] = None,
         source_ip: Optional[str] = None,
         query: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Log SQL injection attempt."""
         event = SecurityEvent(
@@ -236,19 +235,19 @@ class SecurityAuditor:
             source_ip=source_ip,
             action="sql_query",
             result="blocked",
-            details=details or {}
+            details=details or {},
         )
         if query:
             # Don't log full query for security
-            event.details['query_length'] = len(query)
-            event.details['query_preview'] = query[:50] + "..."
+            event.details["query_length"] = len(query)
+            event.details["query_preview"] = query[:50] + "..."
         self.log_event(event)
 
     def log_path_traversal_attempt(
         self,
         user: Optional[str] = None,
         path: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Log path traversal attempt."""
         event = SecurityEvent(
@@ -258,17 +257,17 @@ class SecurityAuditor:
             user=user,
             action="file_access",
             result="blocked",
-            details=details or {}
+            details=details or {},
         )
         if path:
-            event.details['requested_path'] = path
+            event.details["requested_path"] = path
         self.log_event(event)
 
     def log_credential_rotated(
         self,
         credential_key: str,
         user: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Log credential rotation."""
         event = SecurityEvent(
@@ -279,7 +278,7 @@ class SecurityAuditor:
             resource=credential_key,
             action="rotate",
             result="success",
-            details=details or {}
+            details=details or {},
         )
         self.log_event(event)
 
@@ -289,7 +288,7 @@ class SecurityAuditor:
         description: str,
         user: Optional[str] = None,
         source_ip: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Log security incident."""
         event = SecurityEvent(
@@ -300,9 +299,9 @@ class SecurityAuditor:
             source_ip=source_ip,
             action=incident_type,
             result="incident",
-            details=details or {}
+            details=details or {},
         )
-        event.details['description'] = description
+        event.details["description"] = description
         self.log_event(event)
 
     @staticmethod

@@ -8,17 +8,19 @@ Tests performance impact of security measures:
 - Authorization overhead
 """
 
+# Standard library imports
 import os
 import sys
-import unittest
 import time
+import unittest
 from typing import List
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+# Local imports
 from src.db.pool import DualDatabasePools
-from src.db.vector_ops import store_memory, search_memory, retrieve_memory
+from src.db.vector_ops import retrieve_memory, search_memory, store_memory
 
 
 class TestInputValidationPerformance(unittest.TestCase):
@@ -35,7 +37,7 @@ class TestInputValidationPerformance(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up pools."""
-        if hasattr(cls, 'pools'):
+        if hasattr(cls, "pools"):
             cls.pools.close()
 
     def test_validation_overhead_small_inputs(self):
@@ -47,12 +49,7 @@ class TestInputValidationPerformance(unittest.TestCase):
 
         with self.pools.project_cursor() as cur:
             for i in range(iterations):
-                store_memory(
-                    cur,
-                    namespace=namespace,
-                    key=f"key_{i}",
-                    value="small value"
-                )
+                store_memory(cur, namespace=namespace, key=f"key_{i}", value="small value")
 
         duration = time.time() - start
         avg_time = (duration / iterations) * 1000  # ms
@@ -72,12 +69,7 @@ class TestInputValidationPerformance(unittest.TestCase):
 
         with self.pools.project_cursor() as cur:
             for i in range(iterations):
-                store_memory(
-                    cur,
-                    namespace=namespace,
-                    key=f"large_key_{i}",
-                    value=large_value
-                )
+                store_memory(cur, namespace=namespace, key=f"large_key_{i}", value=large_value)
 
         duration = time.time() - start
         avg_time = (duration / iterations) * 1000  # ms
@@ -102,7 +94,7 @@ class TestInputValidationPerformance(unittest.TestCase):
                     namespace=namespace,
                     key=f"embed_key_{i}",
                     value="test",
-                    embedding=embedding
+                    embedding=embedding,
                 )
 
         duration = time.time() - start
@@ -128,7 +120,7 @@ class TestQueryParameterizationPerformance(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up pools."""
-        if hasattr(cls, 'pools'):
+        if hasattr(cls, "pools"):
             cls.pools.close()
 
     def test_parameterized_query_performance(self):
@@ -158,12 +150,7 @@ class TestQueryParameterizationPerformance(unittest.TestCase):
         # Store test data
         with self.pools.project_cursor() as cur:
             for i in range(batch_size):
-                store_memory(
-                    cur,
-                    namespace=namespace,
-                    key=f"batch_key_{i}",
-                    value=f"value_{i}"
-                )
+                store_memory(cur, namespace=namespace, key=f"batch_key_{i}", value=f"value_{i}")
 
         # Measure batch retrieval
         start = time.time()
@@ -248,7 +235,7 @@ class TestSecurityOverheadBenchmark(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up pools."""
-        if hasattr(cls, 'pools'):
+        if hasattr(cls, "pools"):
             cls.pools.close()
 
     def test_complete_security_stack_overhead(self):
@@ -259,10 +246,10 @@ class TestSecurityOverheadBenchmark(unittest.TestCase):
         # Test data with various security validations
         test_data = [
             {
-                'key': f'key_{i}',
-                'value': f'value_{i}',
-                'embedding': [0.1 * i % 384 for _ in range(384)],
-                'metadata': {'test': True, 'index': i}
+                "key": f"key_{i}",
+                "value": f"value_{i}",
+                "embedding": [0.1 * i % 384 for _ in range(384)],
+                "metadata": {"test": True, "index": i},
             }
             for i in range(iterations)
         ]
@@ -276,14 +263,14 @@ class TestSecurityOverheadBenchmark(unittest.TestCase):
                 store_memory(
                     cur,
                     namespace=namespace,
-                    key=data['key'],
-                    value=data['value'],
-                    embedding=data['embedding'],
-                    metadata=data['metadata']
+                    key=data["key"],
+                    value=data["value"],
+                    embedding=data["embedding"],
+                    metadata=data["metadata"],
                 )
 
                 # Retrieve (includes validation)
-                result = retrieve_memory(cur, namespace, data['key'])
+                result = retrieve_memory(cur, namespace, data["key"])
                 self.assertIsNotNone(result)
 
         duration = time.time() - start
@@ -307,7 +294,7 @@ class TestSecurityOverheadBenchmark(unittest.TestCase):
                     namespace=namespace,
                     key=f"vec_key_{i}",
                     value=f"value_{i}",
-                    embedding=[0.01 * i % 384 for _ in range(384)]
+                    embedding=[0.01 * i % 384 for _ in range(384)],
                 )
 
         # Measure search with security validation
@@ -321,7 +308,7 @@ class TestSecurityOverheadBenchmark(unittest.TestCase):
                     namespace=namespace,
                     query_embedding=query_embedding,
                     limit=10,
-                    min_similarity=0.7
+                    min_similarity=0.7,
                 )
 
         duration = time.time() - start

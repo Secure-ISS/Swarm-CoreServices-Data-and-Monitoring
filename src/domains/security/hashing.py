@@ -6,21 +6,26 @@ weak hashing algorithms (MD5, SHA-256 with hardcoded salt).
 Addresses CVE-2: Weak Password Hashing
 """
 
+# Standard library imports
 import logging
+import secrets
 from enum import Enum
 from typing import Optional
-import secrets
 
 try:
+    # Third-party imports
     import bcrypt
+
     BCRYPT_AVAILABLE = True
 except ImportError:
     BCRYPT_AVAILABLE = False
     logging.warning("bcrypt not installed. Install with: pip install bcrypt")
 
 try:
+    # Third-party imports
     from argon2 import PasswordHasher as Argon2PasswordHasher
-    from argon2.exceptions import VerifyMismatchError, InvalidHash
+    from argon2.exceptions import InvalidHash, VerifyMismatchError
+
     ARGON2_AVAILABLE = True
 except ImportError:
     ARGON2_AVAILABLE = False
@@ -31,17 +36,20 @@ logger = logging.getLogger(__name__)
 
 class HashAlgorithm(Enum):
     """Supported password hashing algorithms."""
+
     BCRYPT = "bcrypt"  # Default, industry standard
     ARGON2ID = "argon2id"  # Modern, memory-hard
 
 
 class PasswordHashingError(Exception):
     """Raised when password hashing fails."""
+
     pass
 
 
 class PasswordVerificationError(Exception):
     """Raised when password verification fails."""
+
     pass
 
 
@@ -82,9 +90,7 @@ class PasswordHasher:
         self.algorithm = algorithm
 
         if algorithm == HashAlgorithm.BCRYPT and not BCRYPT_AVAILABLE:
-            raise PasswordHashingError(
-                "bcrypt not available. Install with: pip install bcrypt"
-            )
+            raise PasswordHashingError("bcrypt not available. Install with: pip install bcrypt")
 
         if algorithm == HashAlgorithm.ARGON2ID and not ARGON2_AVAILABLE:
             raise PasswordHashingError(
@@ -151,9 +157,9 @@ class PasswordHasher:
 
         try:
             # Detect algorithm from hash format
-            if hashed.startswith('$2a$') or hashed.startswith('$2b$') or hashed.startswith('$2y$'):
+            if hashed.startswith("$2a$") or hashed.startswith("$2b$") or hashed.startswith("$2y$"):
                 return self._verify_bcrypt(password, hashed)
-            elif hashed.startswith('$argon2id$'):
+            elif hashed.startswith("$argon2id$"):
                 return self._verify_argon2(password, hashed)
             else:
                 raise PasswordVerificationError("Unknown hash format")
@@ -167,15 +173,15 @@ class PasswordHasher:
 
     def _hash_bcrypt(self, password: str) -> str:
         """Hash password using bcrypt."""
-        password_bytes = password.encode('utf-8')
+        password_bytes = password.encode("utf-8")
         salt = bcrypt.gensalt(rounds=self.BCRYPT_ROUNDS)
         hashed = bcrypt.hashpw(password_bytes, salt)
-        return hashed.decode('utf-8')
+        return hashed.decode("utf-8")
 
     def _verify_bcrypt(self, password: str, hashed: str) -> bool:
         """Verify password using bcrypt."""
-        password_bytes = password.encode('utf-8')
-        hashed_bytes = hashed.encode('utf-8')
+        password_bytes = password.encode("utf-8")
+        hashed_bytes = hashed.encode("utf-8")
         return bcrypt.checkpw(password_bytes, hashed_bytes)
 
     def _hash_argon2(self, password: str) -> str:
@@ -206,10 +212,10 @@ class PasswordHasher:
                 return True
 
         # For bcrypt, check if rounds match
-        if hashed.startswith('$2'):
+        if hashed.startswith("$2"):
             try:
                 # Extract rounds from hash
-                parts = hashed.split('$')
+                parts = hashed.split("$")
                 if len(parts) >= 3:
                     rounds = int(parts[2])
                     return rounds < self.BCRYPT_ROUNDS

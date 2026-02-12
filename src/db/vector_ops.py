@@ -3,9 +3,13 @@
 Provides functions for storing, retrieving, and searching vector embeddings
 in both project-specific and shared knowledge databases.
 """
-from typing import List, Dict, Any, Optional, Literal
+
+# Standard library imports
 import json
 import logging
+from typing import Any, Dict, List, Literal, Optional
+
+# Third-party imports
 from psycopg2 import DatabaseError, DataError, IntegrityError
 
 # Configure logging
@@ -14,11 +18,13 @@ logger = logging.getLogger(__name__)
 
 class VectorOperationError(Exception):
     """Raised when vector operation fails."""
+
     pass
 
 
 class InvalidEmbeddingError(Exception):
     """Raised when embedding dimensions are invalid."""
+
     pass
 
 
@@ -29,7 +35,7 @@ def store_memory(
     value: str,
     embedding: Optional[List[float]] = None,
     metadata: Optional[Dict] = None,
-    tags: Optional[List[str]] = None
+    tags: Optional[List[str]] = None,
 ) -> None:
     """Store a memory entry with optional vector embedding.
 
@@ -53,16 +59,15 @@ def store_memory(
     embedding_str = None
     if embedding:
         if len(embedding) != 384:
-            raise InvalidEmbeddingError(
-                f"Expected 384-dimensional embedding, got {len(embedding)}"
-            )
+            raise InvalidEmbeddingError(f"Expected 384-dimensional embedding, got {len(embedding)}")
         try:
             embedding_str = f"[{','.join(str(v) for v in embedding)}]"
         except Exception as e:
             raise InvalidEmbeddingError(f"Invalid embedding format: {e}") from e
 
     try:
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO memory_entries
                 (namespace, key, value, embedding, metadata, tags)
             VALUES (%s, %s, %s, %s::ruvector, %s::jsonb, %s)
@@ -72,10 +77,9 @@ def store_memory(
                 metadata = EXCLUDED.metadata,
                 tags = EXCLUDED.tags,
                 updated_at = NOW()
-        """, (
-            namespace, key, value, embedding_str,
-            json.dumps(metadata or {}), tags
-        ))
+        """,
+            (namespace, key, value, embedding_str, json.dumps(metadata or {}), tags),
+        )
         logger.debug(f"Stored memory: {namespace}/{key}")
     except IntegrityError as e:
         logger.error(f"Integrity error storing memory: {e}")
@@ -93,7 +97,7 @@ def search_memory(
     namespace: str,
     query_embedding: List[float],
     limit: int = 10,
-    min_similarity: float = 0.7
+    min_similarity: float = 0.7,
 ) -> List[Dict[str, Any]]:
     """Search memories by vector similarity using HNSW index.
 
@@ -132,22 +136,20 @@ def search_memory(
         raise InvalidEmbeddingError(f"Invalid embedding format: {e}") from e
 
     try:
-        cursor.execute("""
+        # Use SQL format to properly cast the vector
+        query = f"""
             SELECT
                 namespace, key, value, metadata, tags,
-                1 - (embedding <=> %s::ruvector) as similarity,
+                1 - (embedding <=> '{embedding_str}'::ruvector(384)) as similarity,
                 created_at
             FROM memory_entries
             WHERE namespace = %s
               AND embedding IS NOT NULL
-              AND (1 - (embedding <=> %s::ruvector)) >= %s
-            ORDER BY embedding <=> %s::ruvector
+              AND (1 - (embedding <=> '{embedding_str}'::ruvector(384))) >= %s
+            ORDER BY embedding <=> '{embedding_str}'::ruvector(384)
             LIMIT %s
-        """, (
-            embedding_str, namespace,
-            embedding_str, min_similarity,
-            embedding_str, limit
-        ))
+        """
+        cursor.execute(query, (namespace, min_similarity, limit))
 
         results = [dict(row) for row in cursor.fetchall()]
         logger.debug(f"Search found {len(results)} results in {namespace}")
@@ -161,11 +163,7 @@ def search_memory(
         raise VectorOperationError(f"Search operation failed: {e}") from e
 
 
-def retrieve_memory(
-    cursor,
-    namespace: str,
-    key: str
-) -> Optional[Dict[str, Any]]:
+def retrieve_memory(cursor, namespace: str, key: str) -> Optional[Dict[str, Any]]:
     """Retrieve a specific memory entry by namespace and key.
 
     Args:
@@ -183,11 +181,14 @@ def retrieve_memory(
         raise ValueError("namespace and key are required")
 
     try:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT namespace, key, value, metadata, tags, created_at, updated_at
             FROM memory_entries
             WHERE namespace = %s AND key = %s
-        """, (namespace, key))
+        """,
+            (namespace, key),
+        )
 
         result = cursor.fetchone()
         if result:
@@ -200,10 +201,7 @@ def retrieve_memory(
 
 
 def list_memories(
-    cursor,
-    namespace: str,
-    limit: int = 100,
-    offset: int = 0
+    cursor, namespace: str, limit: int = 100, offset: int = 0
 ) -> List[Dict[str, Any]]:
     """List memory entries in a namespace.
 
@@ -216,22 +214,21 @@ def list_memories(
     Returns:
         List of memory entries
     """
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT namespace, key, value, metadata, tags, created_at, updated_at
         FROM memory_entries
         WHERE namespace = %s
         ORDER BY created_at DESC
         LIMIT %s OFFSET %s
-    """, (namespace, limit, offset))
+    """,
+        (namespace, limit, offset),
+    )
 
     return [dict(row) for row in cursor.fetchall()]
 
 
-def delete_memory(
-    cursor,
-    namespace: str,
-    key: str
-) -> bool:
+def delete_memory(cursor, namespace: str, key: str) -> bool:
     """Delete a memory entry.
 
     Args:
@@ -249,11 +246,14 @@ def delete_memory(
         raise ValueError("namespace and key are required")
 
     try:
-        cursor.execute("""
+        cursor.execute(
+            """
             DELETE FROM memory_entries
             WHERE namespace = %s AND key = %s
             RETURNING id
-        """, (namespace, key))
+        """,
+            (namespace, key),
+        )
 
         deleted = cursor.fetchone() is not None
         if deleted:
@@ -265,10 +265,7 @@ def delete_memory(
         raise VectorOperationError(f"Delete operation failed: {e}") from e
 
 
-def count_memories(
-    cursor,
-    namespace: Optional[str] = None
-) -> int:
+def count_memories(cursor, namespace: Optional[str] = None) -> int:
     """Count memory entries, optionally filtered by namespace.
 
     Args:
@@ -279,13 +276,16 @@ def count_memories(
         Count of memory entries
     """
     if namespace:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT COUNT(*) as count
             FROM memory_entries
             WHERE namespace = %s
-        """, (namespace,))
+        """,
+            (namespace,),
+        )
     else:
         cursor.execute("SELECT COUNT(*) as count FROM memory_entries")
 
     result = cursor.fetchone()
-    return result['count'] if result else 0
+    return result["count"] if result else 0

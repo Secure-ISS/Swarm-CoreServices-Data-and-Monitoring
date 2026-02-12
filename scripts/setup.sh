@@ -82,6 +82,18 @@ set -a
 source .env
 set +a
 
+# Set default values if not in .env
+DOCKER_CONTAINER_NAME=${DOCKER_CONTAINER_NAME:-ruvector-db}
+DOCKER_IMAGE=${DOCKER_IMAGE:-ruvnet/ruvector-postgres:latest}
+POSTGRES_HOST=${POSTGRES_HOST:-${RUVECTOR_HOST:-localhost}}
+POSTGRES_PORT=${POSTGRES_PORT:-${RUVECTOR_PORT:-5432}}
+POSTGRES_DB_PROJECT=${POSTGRES_DB_PROJECT:-${RUVECTOR_DB:-distributed_postgres_cluster}}
+POSTGRES_DB_SHARED=${POSTGRES_DB_SHARED:-${SHARED_KNOWLEDGE_DB:-claude_flow_shared}}
+POSTGRES_USER_PROJECT=${POSTGRES_USER_PROJECT:-${RUVECTOR_USER:-dpg_cluster}}
+POSTGRES_USER_SHARED=${POSTGRES_USER_SHARED:-${SHARED_KNOWLEDGE_USER:-shared_user}}
+DPG_CLUSTER_PASSWORD=${DPG_CLUSTER_PASSWORD:-${RUVECTOR_PASSWORD:-dpg_cluster_2026}}
+SHARED_DB_PASSWORD=${SHARED_DB_PASSWORD:-${SHARED_KNOWLEDGE_PASSWORD:-shared_knowledge_2026}}
+
 # Step 3: Start database container
 print_step "Starting database container..."
 
@@ -108,16 +120,17 @@ fi
 print_step "Waiting for PostgreSQL..."
 max_attempts=30
 attempt=0
-until docker exec $DOCKER_CONTAINER_NAME pg_isready -U postgres > /dev/null 2>&1 || [ $attempt -eq $max_attempts ]; do
+until docker exec $DOCKER_CONTAINER_NAME pg_isready -U postgres >/dev/null 2>&1; do
+    if [ $attempt -ge $max_attempts ]; then
+        print_error "PostgreSQL did not become ready in time"
+        print_step "Showing last 20 container log lines:"
+        docker logs --tail 20 $DOCKER_CONTAINER_NAME 2>&1 | tail -5
+        exit 1
+    fi
     attempt=$((attempt + 1))
     echo -n "."
     sleep 1
 done
-
-if [ $attempt -eq $max_attempts ]; then
-    print_error "PostgreSQL did not become ready in time"
-    exit 1
-fi
 print_success "PostgreSQL is ready"
 
 # Step 4: Run health check

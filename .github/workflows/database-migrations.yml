@@ -1,0 +1,546 @@
+name: Database Migrations
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'migrations/**'
+      - 'scripts/sql/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'migrations/**'
+      - 'scripts/sql/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      action:
+        description: 'Migration action'
+        required: true
+        type: choice
+        options:
+          - migrate
+          - rollback
+          - validate
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ============================================================================
+  # VALIDATE MIGRATIONS
+  # ============================================================================
+  validate-migrations:
+    name: Validate Migration Files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary sqlparse pyyaml
+
+      - name: Validate SQL syntax
+        run: |
+          python scripts/ci/validate_migrations.py \
+            --path migrations/ \
+            --check-syntax \
+            --check-reversibility
+
+      - name: Check migration order
+        run: |
+          python scripts/ci/validate_migrations.py \
+            --path migrations/ \
+            --check-order \
+            --check-dependencies
+
+      - name: Detect conflicts
+        run: |
+          python scripts/ci/validate_migrations.py \
+            --path migrations/ \
+            --check-conflicts \
+            --base-branch origin/main
+
+      - name: Generate migration report
+        run: |
+          python scripts/ci/generate_migration_report.py \
+            --path migrations/ \
+            --output migration-report.md
+
+      - name: Upload migration report
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-report
+          path: migration-report.md
+
+  # ============================================================================
+  # TEST MIGRATIONS ON FRESH DATABASE
+  # ============================================================================
+  test-fresh-migration:
+    name: Test Fresh Database Migration
+    runs-on: ubuntu-latest
+    needs: validate-migrations
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: migration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary alembic pyyaml
+
+      - name: Wait for PostgreSQL
+        run: |
+          timeout 60 bash -c 'until pg_isready -h localhost -p 5432; do sleep 1; done'
+
+      - name: Install RuVector extension (if needed)
+        run: |
+          # Build and install RuVector from source
+          docker run --rm \
+            -v $(pwd):/workspace \
+            -e PGHOST=localhost \
+            -e PGPORT=5432 \
+            -e PGUSER=postgres \
+            -e PGPASSWORD=test_password \
+            ruvnet/ruvector-postgres:latest \
+            /workspace/scripts/install_ruvector.sh
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/migration_test
+        run: |
+          alembic upgrade head
+
+      - name: Validate schema
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/migration_test
+        run: |
+          python scripts/ci/validate_schema.py \
+            --expected-schema schema/expected_schema.yaml \
+            --check-tables \
+            --check-indexes \
+            --check-constraints
+
+      - name: Verify RuVector functionality
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/migration_test
+        run: |
+          python scripts/ci/test_ruvector_functionality.py
+
+  # ============================================================================
+  # TEST MIGRATIONS ON EXISTING DATA
+  # ============================================================================
+  test-upgrade-migration:
+    name: Test Upgrade with Existing Data
+    runs-on: ubuntu-latest
+    needs: validate-migrations
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: upgrade_test
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary alembic pyyaml faker
+
+      - name: Restore previous schema
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/upgrade_test
+        run: |
+          # Get previous migration version
+          git fetch origin main
+          git checkout origin/main -- migrations/
+          alembic upgrade head
+          git checkout HEAD -- migrations/
+
+      - name: Seed test data
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/upgrade_test
+        run: |
+          python scripts/ci/seed_test_data.py --count 1000
+
+      - name: Backup data before migration
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/upgrade_test
+        run: |
+          pg_dump -h localhost -U postgres -d upgrade_test > pre-migration.sql
+
+      - name: Run migration
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/upgrade_test
+        run: |
+          alembic upgrade head
+
+      - name: Validate data integrity
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/upgrade_test
+        run: |
+          python scripts/ci/validate_data_integrity.py \
+            --check-counts \
+            --check-references \
+            --check-indexes
+
+      - name: Test rollback
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/upgrade_test
+        run: |
+          alembic downgrade -1
+          python scripts/ci/validate_data_integrity.py
+
+      - name: Upload backup
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pre-migration-backup
+          path: pre-migration.sql
+
+  # ============================================================================
+  # RUVECTOR EXTENSION UPGRADE TEST
+  # ============================================================================
+  test-ruvector-upgrade:
+    name: Test RuVector Extension Upgrade
+    runs-on: ubuntu-latest
+    needs: validate-migrations
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start old RuVector version
+        run: |
+          docker run -d \
+            --name ruvector-old \
+            -e POSTGRES_PASSWORD=test_password \
+            -e POSTGRES_DB=ruvector_test \
+            -p 5432:5432 \
+            ruvnet/ruvector-postgres:1.0.0
+
+          sleep 10
+          docker exec ruvector-old pg_isready
+
+      - name: Create test data with old version
+        run: |
+          docker exec ruvector-old psql -U postgres -d ruvector_test -c "
+            CREATE EXTENSION ruvector;
+            CREATE TABLE test_vectors (
+              id SERIAL PRIMARY KEY,
+              embedding ruvector(384)
+            );
+            CREATE INDEX ON test_vectors USING hnsw (embedding ruvector_cosine_ops);
+            INSERT INTO test_vectors (embedding)
+            SELECT array_agg(random()::real)::ruvector
+            FROM generate_series(1, 384), generate_series(1, 1000);
+          "
+
+      - name: Backup database
+        run: |
+          docker exec ruvector-old pg_dump -U postgres ruvector_test > ruvector-backup.sql
+
+      - name: Stop old container
+        run: docker stop ruvector-old && docker rm ruvector-old
+
+      - name: Start new RuVector version
+        run: |
+          docker run -d \
+            --name ruvector-new \
+            -e POSTGRES_PASSWORD=test_password \
+            -e POSTGRES_DB=ruvector_test \
+            -p 5432:5432 \
+            ruvnet/ruvector-postgres:latest
+
+          sleep 10
+
+      - name: Restore backup
+        run: |
+          docker exec -i ruvector-new psql -U postgres -d ruvector_test < ruvector-backup.sql
+
+      - name: Upgrade extension
+        run: |
+          docker exec ruvector-new psql -U postgres -d ruvector_test -c "
+            ALTER EXTENSION ruvector UPDATE;
+          "
+
+      - name: Verify functionality
+        run: |
+          docker exec ruvector-new psql -U postgres -d ruvector_test -c "
+            SELECT * FROM test_vectors
+            ORDER BY embedding <-> '[1,2,3,...]'::ruvector
+            LIMIT 10;
+          "
+
+      - name: Cleanup
+        if: always()
+        run: docker stop ruvector-new && docker rm ruvector-new
+
+  # ============================================================================
+  # DEPLOY MIGRATIONS TO STAGING
+  # ============================================================================
+  deploy-staging:
+    name: Deploy Migrations to Staging
+    runs-on: ubuntu-latest
+    needs: [test-fresh-migration, test-upgrade-migration, test-ruvector-upgrade]
+    if: github.ref == 'refs/heads/develop' || github.event.inputs.environment == 'staging'
+    environment:
+      name: staging-db
+      url: https://staging-db.dpg-cluster.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary alembic
+
+      - name: Configure database connection
+        run: |
+          echo "DATABASE_URL=${{ secrets.STAGING_DATABASE_URL }}" >> $GITHUB_ENV
+
+      - name: Create backup
+        run: |
+          pg_dump "${{ secrets.STAGING_DATABASE_URL }}" > staging-backup-$(date +%Y%m%d-%H%M%S).sql
+
+      - name: Upload backup to S3
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Store backup
+        run: |
+          aws s3 cp staging-backup-*.sql s3://dpg-backups/staging/$(date +%Y%m%d-%H%M%S).sql
+
+      - name: Run migrations
+        run: |
+          alembic upgrade head
+
+      - name: Validate migration
+        run: |
+          python scripts/ci/validate_schema.py \
+            --expected-schema schema/expected_schema.yaml
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          alembic downgrade -1
+
+      - name: Send notification
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Staging migration ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Staging Migration:* ${{ job.status }}\n*Commit:* ${{ github.sha }}"
+                  }
+                }
+              ]
+            }
+
+  # ============================================================================
+  # DEPLOY MIGRATIONS TO PRODUCTION
+  # ============================================================================
+  deploy-production:
+    name: Deploy Migrations to Production
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'production'
+    environment:
+      name: production-db
+      url: https://db.dpg-cluster.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary alembic
+
+      - name: Create pre-migration backup
+        run: |
+          BACKUP_FILE="production-backup-$(date +%Y%m%d-%H%M%S).sql"
+          pg_dump "${{ secrets.PRODUCTION_DATABASE_URL }}" > $BACKUP_FILE
+          echo "BACKUP_FILE=$BACKUP_FILE" >> $GITHUB_ENV
+
+      - name: Upload backup to S3 with versioning
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Store backup
+        run: |
+          aws s3 cp $BACKUP_FILE s3://dpg-backups/production/$BACKUP_FILE
+          aws s3 cp $BACKUP_FILE s3://dpg-backups/production/latest.sql
+
+      - name: Enable maintenance mode
+        run: |
+          curl -X POST ${{ secrets.MAINTENANCE_MODE_URL }} \
+            -H "Authorization: Bearer ${{ secrets.MAINTENANCE_TOKEN }}" \
+            -d '{"enabled": true}'
+
+      - name: Run migrations with monitoring
+        run: |
+          alembic upgrade head 2>&1 | tee migration.log
+
+      - name: Validate migration
+        run: |
+          python scripts/ci/validate_schema.py \
+            --expected-schema schema/expected_schema.yaml \
+            --check-performance
+
+      - name: Run smoke tests
+        run: |
+          python scripts/ci/database_smoke_tests.py \
+            --database-url "${{ secrets.PRODUCTION_DATABASE_URL }}"
+
+      - name: Disable maintenance mode
+        if: always()
+        run: |
+          curl -X POST ${{ secrets.MAINTENANCE_MODE_URL }} \
+            -H "Authorization: Bearer ${{ secrets.MAINTENANCE_TOKEN }}" \
+            -d '{"enabled": false}'
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Migration failed. Restoring from backup..."
+          psql "${{ secrets.PRODUCTION_DATABASE_URL }}" < $BACKUP_FILE
+
+      - name: Upload migration log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-migration-log
+          path: migration.log
+
+      - name: Send notification
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Production migration ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Migration:* ${{ job.status }}\n*Commit:* ${{ github.sha }}\n*Backup:* ${{ env.BACKUP_FILE }}"
+                  }
+                }
+              ]
+            }
+
+  # ============================================================================
+  # MANUAL ROLLBACK WORKFLOW
+  # ============================================================================
+  rollback:
+    name: Rollback Migration
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'rollback'
+    environment:
+      name: ${{ github.event.inputs.environment }}-db
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary alembic
+
+      - name: Set database URL
+        run: |
+          if [ "${{ github.event.inputs.environment }}" == "staging" ]; then
+            echo "DATABASE_URL=${{ secrets.STAGING_DATABASE_URL }}" >> $GITHUB_ENV
+          else
+            echo "DATABASE_URL=${{ secrets.PRODUCTION_DATABASE_URL }}" >> $GITHUB_ENV
+          fi
+
+      - name: Create backup before rollback
+        run: |
+          pg_dump "$DATABASE_URL" > pre-rollback-backup.sql
+
+      - name: Rollback migration
+        run: |
+          alembic downgrade -1
+
+      - name: Validate rollback
+        run: |
+          python scripts/ci/validate_data_integrity.py
+
+      - name: Upload backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-rollback-backup
+          path: pre-rollback-backup.sql

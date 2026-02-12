@@ -1,0 +1,364 @@
+# GitLab CI/CD Pipeline for Distributed PostgreSQL Cluster
+# Rename to .gitlab-ci.yml to use with GitLab
+
+stages:
+  - validate
+  - test
+  - build
+  - deploy
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  REGISTRY_IMAGE: $CI_REGISTRY_IMAGE
+  PYTHON_VERSION: "3.11"
+
+# ============================================================================
+# TEMPLATES
+# ============================================================================
+
+.python_base:
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - pip install --upgrade pip
+    - pip install -r requirements.txt -r requirements-dev.txt
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - .pip-cache/
+      - .pytest_cache/
+
+.docker_base:
+  image: docker:24-dind
+  services:
+    - docker:24-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+# ============================================================================
+# STAGE: VALIDATE
+# ============================================================================
+
+code-quality:
+  extends: .python_base
+  stage: validate
+  script:
+    - black --check src/ tests/
+    - isort --check-only src/ tests/
+    - flake8 src/ tests/ --max-line-length=120
+    - pylint src/ --fail-under=8.0
+    - mypy src/ --ignore-missing-imports
+  allow_failure: false
+
+security-scan:
+  extends: .python_base
+  stage: validate
+  script:
+    - pip install bandit safety
+    - bandit -r src/ -f json -o bandit-report.json
+    - safety check --json
+  artifacts:
+    reports:
+      sast: bandit-report.json
+    paths:
+      - bandit-report.json
+    expire_in: 1 week
+  allow_failure: true
+
+secrets-scan:
+  stage: validate
+  image: alpine/git
+  script:
+    - |
+      if grep -rn -E "password\s*=\s*['\"].*['\"]|api[_-]?key\s*=\s*['\"].*['\"]" src/; then
+        echo "ERROR: Potential secrets found"
+        exit 1
+      fi
+  allow_failure: false
+
+# ============================================================================
+# STAGE: TEST
+# ============================================================================
+
+unit-tests:
+  extends: .python_base
+  stage: test
+  script:
+    - pytest tests/unit/
+        --cov=src
+        --cov-report=term
+        --cov-report=xml
+        --cov-report=html
+        --junitxml=junit.xml
+  coverage: '/TOTAL.*\s+(\d+%)/'
+  artifacts:
+    reports:
+      junit: junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    paths:
+      - htmlcov/
+      - junit.xml
+    expire_in: 1 week
+
+integration-tests:
+  extends: .python_base
+  stage: test
+  services:
+    - name: postgres:16-alpine
+      alias: postgres
+    - name: redis:7-alpine
+      alias: redis
+  variables:
+    POSTGRES_PASSWORD: test_password
+    POSTGRES_DB: test_db
+    DATABASE_URL: postgresql://postgres:test_password@postgres:5432/test_db
+    REDIS_URL: redis://redis:6379
+  script:
+    - python scripts/init_database.py
+    - pytest tests/integration/
+        --cov=src
+        --cov-report=xml
+        --junitxml=junit-integration.xml
+  artifacts:
+    reports:
+      junit: junit-integration.xml
+    expire_in: 1 week
+
+e2e-tests:
+  stage: test
+  image: docker/compose:latest
+  script:
+    - docker-compose -f docker-compose.test.yml up -d
+    - sleep 30
+    - docker-compose -f docker-compose.test.yml exec -T api pytest tests/e2e/ -v
+  after_script:
+    - docker-compose -f docker-compose.test.yml logs
+    - docker-compose -f docker-compose.test.yml down -v
+  only:
+    - develop
+    - main
+
+performance-tests:
+  extends: .python_base
+  stage: test
+  services:
+    - postgres:16-alpine
+    - redis:7-alpine
+  variables:
+    POSTGRES_PASSWORD: test_password
+    DATABASE_URL: postgresql://postgres:test_password@postgres:5432/test_db
+  script:
+    - pip install pytest-benchmark locust
+    - pytest tests/performance/
+        --benchmark-only
+        --benchmark-json=benchmark.json
+    - python scripts/ci/check_performance_regression.py
+        --current benchmark.json
+        --baseline performance-baseline.json
+        --threshold 10
+  artifacts:
+    paths:
+      - benchmark.json
+    expire_in: 1 month
+  allow_failure: true
+
+# ============================================================================
+# STAGE: BUILD
+# ============================================================================
+
+build-image:
+  extends: .docker_base
+  stage: build
+  script:
+    - docker build
+        -f docker/Dockerfile.api
+        -t $REGISTRY_IMAGE:$CI_COMMIT_SHA
+        -t $REGISTRY_IMAGE:latest
+        --build-arg VERSION=$CI_COMMIT_SHA
+        .
+    - docker push $REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker push $REGISTRY_IMAGE:latest
+  only:
+    - develop
+    - main
+
+trivy-scan:
+  stage: build
+  image: aquasec/trivy:latest
+  script:
+    - trivy image
+        --severity HIGH,CRITICAL
+        --format json
+        --output trivy-report.json
+        $REGISTRY_IMAGE:$CI_COMMIT_SHA
+  artifacts:
+    paths:
+      - trivy-report.json
+    expire_in: 1 week
+  dependencies:
+    - build-image
+  allow_failure: true
+
+# ============================================================================
+# STAGE: DEPLOY
+# ============================================================================
+
+.deploy_template:
+  image: alpine/k8s:latest
+  before_script:
+    - kubectl config set-cluster k8s --server="$KUBE_URL" --insecure-skip-tls-verify=true
+    - kubectl config set-credentials admin --token="$KUBE_TOKEN"
+    - kubectl config set-context default --cluster=k8s --user=admin
+    - kubectl config use-context default
+
+deploy-staging:
+  extends: .deploy_template
+  stage: deploy
+  environment:
+    name: staging
+    url: https://staging.dpg-cluster.example.com
+    on_stop: stop-staging
+  script:
+    - kubectl set image deployment/dpg-api
+        api=$REGISTRY_IMAGE:$CI_COMMIT_SHA
+        -n staging
+    - kubectl rollout status deployment/dpg-api -n staging
+    - python scripts/ci/smoke_tests.py --url https://staging.dpg-cluster.example.com
+  only:
+    - develop
+
+deploy-production:
+  extends: .deploy_template
+  stage: deploy
+  environment:
+    name: production
+    url: https://dpg-cluster.example.com
+  script:
+    # Blue-Green deployment
+    - |
+      CURRENT=$(kubectl get service dpg-api -n production -o jsonpath='{.spec.selector.version}')
+      NEW=$([ "$CURRENT" == "blue" ] && echo "green" || echo "blue")
+
+      kubectl set image deployment/dpg-api-$NEW
+        api=$REGISTRY_IMAGE:$CI_COMMIT_SHA
+        -n production
+
+      kubectl rollout status deployment/dpg-api-$NEW -n production
+
+      kubectl patch service dpg-api -n production
+        -p "{\"spec\":{\"selector\":{\"version\":\"$NEW\"}}}"
+
+      python scripts/ci/smoke_tests.py --url https://dpg-cluster.example.com --critical
+  when: manual
+  only:
+    - main
+
+stop-staging:
+  extends: .deploy_template
+  stage: deploy
+  environment:
+    name: staging
+    action: stop
+  script:
+    - kubectl scale deployment/dpg-api --replicas=0 -n staging
+  when: manual
+  only:
+    - develop
+
+# ============================================================================
+# DATABASE MIGRATIONS
+# ============================================================================
+
+migrate-staging:
+  extends: .python_base
+  stage: deploy
+  environment:
+    name: staging-db
+  script:
+    - pip install alembic psycopg2-binary
+    - alembic upgrade head
+  only:
+    - develop
+  when: manual
+
+migrate-production:
+  extends: .python_base
+  stage: deploy
+  environment:
+    name: production-db
+  before_script:
+    - pip install alembic psycopg2-binary
+    - pg_dump "$DATABASE_URL" > backup-$(date +%Y%m%d-%H%M%S).sql
+  script:
+    - alembic upgrade head
+    - python scripts/ci/validate_schema.py --expected-schema schema/expected_schema.yaml
+  after_script:
+    - python scripts/ci/database_smoke_tests.py --database-url "$DATABASE_URL"
+  artifacts:
+    paths:
+      - backup-*.sql
+    expire_in: 1 month
+  only:
+    - main
+  when: manual
+
+# ============================================================================
+# MONITORING
+# ============================================================================
+
+update-monitoring:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      # Update Prometheus rules
+      curl -X POST "$PROMETHEUS_URL/-/reload" \
+        -H "Authorization: Bearer $PROMETHEUS_TOKEN"
+
+      # Import Grafana dashboards
+      for dashboard in grafana/dashboards/*.json; do
+        curl -X POST "$GRAFANA_URL/api/dashboards/db" \
+          -H "Authorization: Bearer $GRAFANA_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d @$dashboard
+      done
+  only:
+    - main
+  when: manual
+
+# ============================================================================
+# NOTIFICATIONS
+# ============================================================================
+
+.notify:
+  image: curlimages/curl:latest
+  stage: .post
+  script:
+    - |
+      curl -X POST $SLACK_WEBHOOK_URL \
+        -H "Content-Type: application/json" \
+        -d "{
+          \"text\": \"Pipeline $CI_PIPELINE_STATUS for $CI_PROJECT_NAME\",
+          \"blocks\": [{
+            \"type\": \"section\",
+            \"text\": {
+              \"type\": \"mrkdwn\",
+              \"text\": \"*Status:* $CI_PIPELINE_STATUS\n*Branch:* $CI_COMMIT_REF_NAME\n*Commit:* $CI_COMMIT_SHORT_SHA\"
+            }
+          }]
+        }"
+  when: always
+
+notify-success:
+  extends: .notify
+  only:
+    - main
+  when: on_success
+
+notify-failure:
+  extends: .notify
+  when: on_failure

@@ -1,0 +1,148 @@
+# Application-level alerting rules
+
+groups:
+  - name: application
+    interval: 15s
+    rules:
+      # High request rate
+      - alert: HighRequestRate
+        expr: rate(dpg_query_duration_seconds_count[5m]) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High request rate on {{ $labels.instance }}"
+          description: "Request rate is {{ $value }}/s on {{ $labels.instance }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/high-request-rate"
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: |
+          (rate(dpg_query_duration_seconds_count{status=~"5.."}[5m]) /
+           rate(dpg_query_duration_seconds_count[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          category: application
+        annotations:
+          summary: "High error rate on {{ $labels.instance }}"
+          description: "Error rate is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/high-error-rate"
+
+      # Slow response time
+      - alert: SlowResponseTime
+        expr: |
+          histogram_quantile(0.95,
+            rate(dpg_query_duration_seconds_bucket[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Slow response time on {{ $labels.instance }}"
+          description: "95th percentile response time is {{ $value }}s"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/slow-response-time"
+
+      # Critical response time
+      - alert: CriticalResponseTime
+        expr: |
+          histogram_quantile(0.95,
+            rate(dpg_query_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "Critical response time on {{ $labels.instance }}"
+          description: "95th percentile response time is {{ $value }}s"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/critical-response-time"
+
+      # Service degradation
+      - alert: ServiceDegradation
+        expr: |
+          (rate(dpg_query_duration_seconds_count{status="200"}[5m]) /
+           rate(dpg_query_duration_seconds_count[5m])) < 0.95
+        for: 10m
+        labels:
+          severity: warning
+          category: application
+        annotations:
+          summary: "Service degradation on {{ $labels.instance }}"
+          description: "Success rate is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/service-degradation"
+
+      # Connection pool exhaustion
+      - alert: ConnectionPoolExhaustion
+        expr: dpg_db_connections_waiting > 10
+        for: 5m
+        labels:
+          severity: critical
+          category: application
+        annotations:
+          summary: "Connection pool exhaustion on {{ $labels.instance }}"
+          description: "{{ $value }} connections are waiting for a backend"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/connection-pool-exhaustion"
+
+      # Cache miss rate high
+      - alert: HighCacheMissRate
+        expr: (1 - dpg_cache_hit_ratio) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High cache miss rate on {{ $labels.instance }}"
+          description: "Cache miss rate is {{ $value | humanizePercentage }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/high-cache-miss-rate"
+
+      # Memory leak detection
+      - alert: PossibleMemoryLeak
+        expr: |
+          (rate(dpg_redis_memory_used_bytes[1h]) > 1048576) and
+          (dpg_redis_keys_total < 1000)
+        for: 2h
+        labels:
+          severity: warning
+          category: application
+        annotations:
+          summary: "Possible memory leak on {{ $labels.instance }}"
+          description: "Memory growing at {{ $value | humanize }}B/s with low key count"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/memory-leak"
+
+      # Stale data detection
+      - alert: StaleDataDetected
+        expr: |
+          (time() - dpg_table_last_update_timestamp) > 3600
+        for: 30m
+        labels:
+          severity: warning
+          category: application
+        annotations:
+          summary: "Stale data detected on {{ $labels.instance }}"
+          description: "Table {{ $labels.tablename }} has not been updated for {{ $value | humanizeDuration }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/stale-data"
+
+      # Batch job failure
+      - alert: BatchJobFailure
+        expr: dpg_batch_job_status{status="failed"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          category: application
+        annotations:
+          summary: "Batch job failure on {{ $labels.instance }}"
+          description: "Batch job {{ $labels.job_name }} has failed"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/batch-job-failure"
+
+      # Health check failing
+      - alert: HealthCheckFailing
+        expr: up{job="dpg-application"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: application
+        annotations:
+          summary: "Health check failing on {{ $labels.instance }}"
+          description: "Application health check has been failing for 2 minutes"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/health-check-failing"

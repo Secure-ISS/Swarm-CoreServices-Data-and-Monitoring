@@ -1,0 +1,48 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Citus Coordinator",
+      "Group": "Citus Cluster",
+      "Host": "citus-coordinator",
+      "Port": 5432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "Citus coordinator node - query routing and metadata",
+      "PassFile": "/tmp/pgpassfile"
+    },
+    "2": {
+      "Name": "Citus Worker 1",
+      "Group": "Citus Cluster",
+      "Host": "citus-worker-1",
+      "Port": 5432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "Citus worker node 1 - shard storage",
+      "PassFile": "/tmp/pgpassfile"
+    },
+    "3": {
+      "Name": "Citus Worker 2",
+      "Group": "Citus Cluster",
+      "Host": "citus-worker-2",
+      "Port": 5432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "Citus worker node 2 - shard storage",
+      "PassFile": "/tmp/pgpassfile"
+    },
+    "4": {
+      "Name": "Citus Worker 3",
+      "Group": "Citus Cluster",
+      "Host": "citus-worker-3",
+      "Port": 5432,
+      "MaintenanceDB": "distributed_postgres_cluster",
+      "Username": "dpg_cluster",
+      "SSLMode": "prefer",
+      "Comment": "Citus worker node 3 - shard storage",
+      "PassFile": "/tmp/pgpassfile"
+    }
+  }
+}

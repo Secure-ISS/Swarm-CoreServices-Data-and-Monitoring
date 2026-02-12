@@ -47,7 +47,7 @@ with conn.cursor(cursor_factory=RealDictCursor) as cur:
         ORDER BY key
         LIMIT 10
     """, ('%hooks%',))
-    
+
     for row in cur.fetchall():
         print(f"{row['key']}: {row['value'][:100]}...")
 
@@ -68,33 +68,33 @@ PGPASSWORD=shared_knowledge_2026 psql -h localhost -U shared_user -d claude_flow
 
 ```sql
 -- List all available knowledge keys
-SELECT key, length(value) as size 
-FROM memory_entries 
-WHERE namespace = 'claude-flow-v3-learnings' 
+SELECT key, length(value) as size
+FROM memory_entries
+WHERE namespace = 'claude-flow-v3-learnings'
 ORDER BY key;
 
 -- Search for specific topic
-SELECT key, value 
-FROM memory_entries 
+SELECT key, value
+FROM memory_entries
 WHERE namespace = 'claude-flow-v3-learnings'
   AND (value ILIKE '%hooks%' OR key ILIKE '%hooks%')
 ORDER BY key;
 
 -- Get specific entry
-SELECT key, value, metadata 
-FROM memory_entries 
-WHERE namespace = 'claude-flow-v3-learnings' 
+SELECT key, value, metadata
+FROM memory_entries
+WHERE namespace = 'claude-flow-v3-learnings'
   AND key = 'reasoningbank-api';
 
 -- Get all entries by category (from metadata)
 SELECT key, value, metadata->>'_original_namespace' as category
-FROM memory_entries 
+FROM memory_entries
 WHERE namespace = 'claude-flow-v3-learnings'
   AND metadata->>'_original_namespace' LIKE 'v3-hooks%'
 ORDER BY key;
 
 -- Vector similarity search (if you have embeddings)
-SELECT key, value, 
+SELECT key, value,
        1 - (embedding <=> '[your 384-dim embedding]'::ruvector) as similarity
 FROM memory_entries
 WHERE namespace = 'claude-flow-v3-learnings'
@@ -176,11 +176,11 @@ pool = RuVectorPool()
 with pool.cursor() as cur:
     # Get all knowledge keys
     cur.execute("""
-        SELECT key FROM memory_entries 
-        WHERE namespace = 'claude-flow-v3-learnings' 
+        SELECT key FROM memory_entries
+        WHERE namespace = 'claude-flow-v3-learnings'
         ORDER BY key
     """)
-    
+
     keys = [row['key'] for row in cur.fetchall()]
     print(f"Available knowledge: {len(keys)} entries")
     for key in keys[:10]:
@@ -196,19 +196,19 @@ pool.close()
 ```bash
 # Execute queries directly
 docker exec ruvector-db psql -U shared_user -d claude_flow_shared -c "
-SELECT key, substring(value, 1, 80) as preview 
-FROM memory_entries 
-WHERE namespace = 'claude-flow-v3-learnings' 
-ORDER BY key 
+SELECT key, substring(value, 1, 80) as preview
+FROM memory_entries
+WHERE namespace = 'claude-flow-v3-learnings'
+ORDER BY key
 LIMIT 5;
 "
 
 # Export all knowledge to JSON
 docker exec ruvector-db psql -U shared_user -d claude_flow_shared -t -c "
-SELECT json_agg(row_to_json(t)) 
+SELECT json_agg(row_to_json(t))
 FROM (
-    SELECT key, value, metadata 
-    FROM memory_entries 
+    SELECT key, value, metadata
+    FROM memory_entries
     WHERE namespace = 'claude-flow-v3-learnings'
 ) t;
 " > claude_flow_knowledge.json
@@ -301,8 +301,8 @@ except Exception as e:
 
 ### Via SQL
 ```sql
-SELECT key, value 
-FROM memory_entries 
+SELECT key, value
+FROM memory_entries
 WHERE namespace = 'claude-flow-v3-learnings'
   AND key LIKE 'hook-%'
 ORDER BY key;
@@ -326,13 +326,13 @@ conn = psycopg2.connect(
 
 with conn.cursor(cursor_factory=RealDictCursor) as cur:
     cur.execute("""
-        SELECT key, value 
-        FROM memory_entries 
+        SELECT key, value
+        FROM memory_entries
         WHERE namespace = 'claude-flow-v3-learnings'
           AND key LIKE 'hook-%'
         ORDER BY key
     """)
-    
+
     hooks = cur.fetchall()
     for hook in hooks:
         print(f"\n{hook['key']}:")
@@ -400,7 +400,7 @@ SELECT DISTINCT namespace FROM memory_entries;
    ```python
    import os
    import psycopg2
-   
+
    conn = psycopg2.connect(
        host="localhost",
        port=5432,
@@ -408,7 +408,7 @@ SELECT DISTINCT namespace FROM memory_entries;
        user=os.getenv('SHARED_KNOWLEDGE_USER'),
        password=os.getenv('SHARED_KNOWLEDGE_PASSWORD')
    )
-   
+
    # Query shared knowledge
    with conn.cursor() as cur:
        cur.execute(
@@ -417,13 +417,13 @@ SELECT DISTINCT namespace FROM memory_entries;
        )
        knowledge = cur.fetchone()[0]
        print(knowledge)
-   
+
    conn.close()
    ```
 
 3. **Tell Claude:**
-   > "I have access to a shared Claude Flow V3 knowledge database at localhost:5432/claude_flow_shared. 
-   > Use the connection details in `.env` to access 82 entries of Claude Flow documentation and best practices 
+   > "I have access to a shared Claude Flow V3 knowledge database at localhost:5432/claude_flow_shared.
+   > Use the connection details in `.env` to access 82 entries of Claude Flow documentation and best practices
    > in the 'claude-flow-v3-learnings' namespace."
 
 ---

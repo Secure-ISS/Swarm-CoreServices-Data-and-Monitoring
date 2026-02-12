@@ -8,18 +8,20 @@ Tests performance of integration components:
 - Concurrent operation performance
 """
 
+# Standard library imports
 import os
 import sys
-import unittest
-import time
 import threading
-from typing import List, Dict, Any
+import time
+import unittest
+from typing import Any, Dict, List
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
+# Local imports
 from src.db.pool import DualDatabasePools
-from src.db.vector_ops import store_memory, search_memory
+from src.db.vector_ops import search_memory, store_memory
 
 
 class TestMCPServerPerformance(unittest.TestCase):
@@ -70,12 +72,7 @@ class TestMCPServerPerformance(unittest.TestCase):
 
             # Simulate MCP tool calling database operation
             with pools.project_cursor() as cur:
-                store_memory(
-                    cur,
-                    namespace="mcp_perf",
-                    key=f"key_{i}",
-                    value="test_value"
-                )
+                store_memory(cur, namespace="mcp_perf", key=f"key_{i}", value="test_value")
 
             duration = (time.time() - start) * 1000  # ms
             timings.append(duration)
@@ -98,11 +95,7 @@ class TestEventBusPerformance(unittest.TestCase):
 
         def publish_event(event_type: str, data: Dict[str, Any]):
             """Simulate event publishing."""
-            event = {
-                'type': event_type,
-                'timestamp': time.time(),
-                'data': data
-            }
+            event = {"type": event_type, "timestamp": time.time(), "data": data}
             events.append(event)
             return event
 
@@ -111,7 +104,7 @@ class TestEventBusPerformance(unittest.TestCase):
         start = time.time()
 
         for i in range(num_events):
-            publish_event('test.event', {'index': i})
+            publish_event("test.event", {"index": i})
 
         duration = time.time() - start
         throughput = num_events / duration
@@ -137,11 +130,7 @@ class TestEventBusPerformance(unittest.TestCase):
         start = time.time()
 
         for i in range(num_events):
-            event = {
-                'type': 'test.event',
-                'timestamp': time.time(),
-                'data': {'index': i}
-            }
+            event = {"type": "test.event", "timestamp": time.time(), "data": {"index": i}}
             handler(event)  # Direct call simulates event delivery
 
         duration = time.time() - start
@@ -154,6 +143,7 @@ class TestEventBusPerformance(unittest.TestCase):
 
     def test_concurrent_event_processing(self):
         """Test concurrent event processing performance."""
+        # Standard library imports
         import queue
 
         event_queue = queue.Queue()
@@ -191,7 +181,7 @@ class TestEventBusPerformance(unittest.TestCase):
         start = time.time()
 
         for i in range(num_events):
-            event_queue.put({'type': 'test.event', 'data': {'index': i}})
+            event_queue.put({"type": "test.event", "data": {"index": i}})
 
         # Wait for completion
         event_queue.join()
@@ -228,7 +218,7 @@ class TestEndToEndLatency(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up pools."""
-        if hasattr(cls, 'pools'):
+        if hasattr(cls, "pools"):
             cls.pools.close()
 
     def test_memory_store_retrieve_latency(self):
@@ -242,18 +232,15 @@ class TestEndToEndLatency(unittest.TestCase):
             # Complete flow
             with self.pools.project_cursor() as cur:
                 # Store
-                store_memory(
-                    cur,
-                    namespace="latency_test",
-                    key=f"key_{i}",
-                    value="test_value"
-                )
+                store_memory(cur, namespace="latency_test", key=f"key_{i}", value="test_value")
 
             # Implicit commit here
 
             # Retrieve (new cursor simulates separate request)
             with self.pools.project_cursor() as cur:
+                # Local imports
                 from src.db.vector_ops import retrieve_memory
+
                 result = retrieve_memory(cur, "latency_test", f"key_{i}")
 
             latency = (time.time() - start) * 1000  # ms
@@ -281,7 +268,7 @@ class TestEndToEndLatency(unittest.TestCase):
                     namespace="search_latency",
                     key=f"key_{i}",
                     value=f"value_{i}",
-                    embedding=[0.01 * (i % 384) for _ in range(384)]
+                    embedding=[0.01 * (i % 384) for _ in range(384)],
                 )
 
         # Test search latency
@@ -298,7 +285,7 @@ class TestEndToEndLatency(unittest.TestCase):
                     namespace="search_latency",
                     query_embedding=query,
                     limit=10,
-                    min_similarity=0.5
+                    min_similarity=0.5,
                 )
 
             latency = (time.time() - start) * 1000  # ms
@@ -330,7 +317,7 @@ class TestConcurrentOperationPerformance(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up pools."""
-        if hasattr(cls, 'pools'):
+        if hasattr(cls, "pools"):
             cls.pools.close()
 
     def test_concurrent_write_performance(self):
@@ -352,7 +339,7 @@ class TestConcurrentOperationPerformance(unittest.TestCase):
                             cur,
                             namespace="concurrent_write",
                             key=f"thread_{thread_id}_key_{i}",
-                            value=f"value_{i}"
+                            value=f"value_{i}",
                         )
 
                 duration = time.time() - start
@@ -393,12 +380,7 @@ class TestConcurrentOperationPerformance(unittest.TestCase):
         # Setup: Store test data
         with self.pools.project_cursor() as cur:
             for i in range(100):
-                store_memory(
-                    cur,
-                    namespace="concurrent_read",
-                    key=f"key_{i}",
-                    value=f"value_{i}"
-                )
+                store_memory(cur, namespace="concurrent_read", key=f"key_{i}", value=f"value_{i}")
 
         # Test concurrent reads
         num_threads = 10
@@ -412,12 +394,10 @@ class TestConcurrentOperationPerformance(unittest.TestCase):
             try:
                 for i in range(ops_per_thread):
                     with self.pools.project_cursor() as cur:
+                        # Local imports
                         from src.db.vector_ops import retrieve_memory
-                        result = retrieve_memory(
-                            cur,
-                            "concurrent_read",
-                            f"key_{i % 100}"
-                        )
+
+                        result = retrieve_memory(cur, "concurrent_read", f"key_{i % 100}")
 
                         if result:
                             with lock:

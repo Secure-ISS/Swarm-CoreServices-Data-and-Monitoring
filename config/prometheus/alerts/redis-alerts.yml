@@ -1,0 +1,141 @@
+# Redis alerting rules
+
+groups:
+  - name: redis
+    interval: 15s
+    rules:
+      # Redis instance down
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "Redis instance {{ $labels.instance }} is down"
+          description: "Redis instance {{ $labels.instance }} has been down for more than 1 minute"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/redis-down"
+
+      # Redis memory usage high
+      - alert: RedisMemoryUsageHigh
+        expr: |
+          (dpg_redis_memory_used_bytes /
+           redis_memory_max_bytes) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Redis memory usage high on {{ $labels.instance }}"
+          description: "Redis is using {{ $value | humanizePercentage }} of max memory"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/redis-memory-high"
+
+      # Redis memory usage critical
+      - alert: RedisMemoryUsageCritical
+        expr: |
+          (dpg_redis_memory_used_bytes /
+           redis_memory_max_bytes) > 0.95
+        for: 5m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "Redis memory usage critical on {{ $labels.instance }}"
+          description: "Redis is using {{ $value | humanizePercentage }} of max memory"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/redis-memory-critical"
+
+      # Redis hit rate low
+      - alert: RedisHitRateLow
+        expr: dpg_redis_hit_rate < 0.8
+        for: 15m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Redis hit rate low on {{ $labels.instance }}"
+          description: "Redis hit rate is {{ $value | humanizePercentage }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/redis-hit-rate-low"
+
+      # Redis evictions high
+      - alert: RedisEvictionsHigh
+        expr: rate(dpg_redis_evicted_keys_total[5m]) > 10
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Redis evictions high on {{ $labels.instance }}"
+          description: "Redis is evicting {{ $value }} keys/s"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/redis-evictions-high"
+
+      # Redis connected clients high
+      - alert: RedisConnectedClientsHigh
+        expr: redis_connected_clients > 100
+        for: 10m
+        labels:
+          severity: warning
+          category: database
+        annotations:
+          summary: "Redis connected clients high on {{ $labels.instance }}"
+          description: "Redis has {{ $value }} connected clients"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/redis-clients-high"
+
+      # Redis blocked clients
+      - alert: RedisBlockedClients
+        expr: redis_blocked_clients > 0
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Redis has blocked clients on {{ $labels.instance }}"
+          description: "Redis has {{ $value }} blocked clients"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/redis-blocked-clients"
+
+      # Redis rejected connections
+      - alert: RedisRejectedConnections
+        expr: rate(redis_rejected_connections_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "Redis rejecting connections on {{ $labels.instance }}"
+          description: "Redis is rejecting {{ $value }} connections/s"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/redis-rejected-connections"
+
+      # Redis slow log entries
+      - alert: RedisSlowLogEntries
+        expr: rate(redis_slowlog_length[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Redis slow log growing on {{ $labels.instance }}"
+          description: "Redis slow log is growing at {{ $value }} entries/s"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/redis-slow-log"
+
+      # Redis fragmentation ratio high
+      - alert: RedisFragmentationHigh
+        expr: redis_mem_fragmentation_ratio > 1.5
+        for: 30m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Redis fragmentation high on {{ $labels.instance }}"
+          description: "Redis fragmentation ratio is {{ $value }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/redis-fragmentation"
+
+      # Redis persistence errors
+      - alert: RedisPersistenceErrors
+        expr: rate(redis_rdb_last_save_timestamp_seconds[5m]) == 0
+        for: 30m
+        labels:
+          severity: warning
+          category: database
+        annotations:
+          summary: "Redis persistence errors on {{ $labels.instance }}"
+          description: "Redis has not persisted data for 30 minutes"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/redis-persistence-errors"

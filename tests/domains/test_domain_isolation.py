@@ -8,14 +8,15 @@ Tests proper isolation and boundaries between domains:
 - Clear interfaces between domains
 """
 
+# Standard library imports
+import importlib.util
 import os
 import sys
 import unittest
 from typing import Set
-import importlib.util
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 
 class TestDomainBoundaries(unittest.TestCase):
@@ -25,8 +26,15 @@ class TestDomainBoundaries(unittest.TestCase):
         """Test that security domain has no external dependencies."""
         # Security layer should only depend on standard library and db layer
         allowed_imports = {
-            'os', 'sys', 'unittest', 'typing', 'psycopg2',
-            'json', 'logging', 'time', 'threading'
+            "os",
+            "sys",
+            "unittest",
+            "typing",
+            "psycopg2",
+            "json",
+            "logging",
+            "time",
+            "threading",
         }
 
         # In a real implementation, would scan actual security module imports
@@ -44,10 +52,10 @@ class TestDomainBoundaries(unittest.TestCase):
         # Domain dependency flow should be one-way:
         # Application → Integration → Security → Database
         dependencies = {
-            'database': set(),  # No dependencies
-            'security': {'database'},  # Depends only on database
-            'integration': {'database', 'security'},  # Can use both
-            'application': {'database', 'security', 'integration'}  # Can use all
+            "database": set(),  # No dependencies
+            "security": {"database"},  # Depends only on database
+            "integration": {"database", "security"},  # Can use both
+            "application": {"database", "security", "integration"},  # Can use all
         }
 
         # Verify no circular dependencies
@@ -64,23 +72,22 @@ class TestSecurityDomainIsolation(unittest.TestCase):
         """Test that authentication logic is isolated."""
         # Authentication should be self-contained
         # No dependencies on business logic
+        # Local imports
         from src.db.pool import (
-            DualDatabasePools,
+            DatabaseConfigurationError,
             DatabaseConnectionError,
-            DatabaseConfigurationError
+            DualDatabasePools,
         )
 
         # These classes should not have external dependencies
-        self.assertTrue(hasattr(DualDatabasePools, '__init__'))
+        self.assertTrue(hasattr(DualDatabasePools, "__init__"))
         self.assertTrue(issubclass(DatabaseConnectionError, Exception))
         self.assertTrue(issubclass(DatabaseConfigurationError, Exception))
 
     def test_input_validation_isolated(self):
         """Test that input validation is isolated."""
-        from src.db.vector_ops import (
-            InvalidEmbeddingError,
-            VectorOperationError
-        )
+        # Local imports
+        from src.db.vector_ops import InvalidEmbeddingError, VectorOperationError
 
         # Validation exceptions should be self-contained
         self.assertTrue(issubclass(InvalidEmbeddingError, Exception))
@@ -142,6 +149,7 @@ class TestDatabaseLayerIsolation(unittest.TestCase):
 
     def test_connection_pool_isolated(self):
         """Test that connection pooling is isolated."""
+        # Local imports
         from src.db.pool import DualDatabasePools
 
         # Connection pool should:
@@ -149,19 +157,17 @@ class TestDatabaseLayerIsolation(unittest.TestCase):
         # - Not contain query logic
         # - Not contain business logic
 
-        pool_methods = [m for m in dir(DualDatabasePools) if not m.startswith('_')]
+        pool_methods = [m for m in dir(DualDatabasePools) if not m.startswith("_")]
 
         # Should have minimal public interface
-        expected_methods = {
-            'project_cursor', 'shared_cursor',
-            'health_check', 'close'
-        }
+        expected_methods = {"project_cursor", "shared_cursor", "health_check", "close"}
 
         for method in expected_methods:
             self.assertIn(method, pool_methods)
 
     def test_vector_operations_isolated(self):
         """Test that vector operations are isolated."""
+        # Local imports
         import src.db.vector_ops as vector_ops
 
         # Vector ops should:
@@ -169,13 +175,16 @@ class TestDatabaseLayerIsolation(unittest.TestCase):
         # - Validate inputs
         # - Not contain business logic
 
-        functions = [f for f in dir(vector_ops) if not f.startswith('_')]
+        functions = [f for f in dir(vector_ops) if not f.startswith("_")]
 
         # Should have clear CRUD interface
         expected_functions = [
-            'store_memory', 'retrieve_memory',
-            'search_memory', 'delete_memory',
-            'list_memories', 'count_memories'
+            "store_memory",
+            "retrieve_memory",
+            "search_memory",
+            "delete_memory",
+            "list_memories",
+            "count_memories",
         ]
 
         for func in expected_functions:
@@ -192,6 +201,7 @@ class TestInterfaceContracts(unittest.TestCase):
         # - Parameterized queries
         # - No direct SQL construction
 
+        # Local imports
         from src.db.pool import DualDatabasePools
 
         pools = None
@@ -202,7 +212,7 @@ class TestInterfaceContracts(unittest.TestCase):
             with pools.project_cursor() as cur:
                 self.assertIsNotNone(cur)
                 # Cursor should support parameterized queries
-                self.assertTrue(hasattr(cur, 'execute'))
+                self.assertTrue(hasattr(cur, "execute"))
 
         except Exception as e:
             self.skipTest(f"Database not available: {e}")
@@ -217,10 +227,8 @@ class TestInterfaceContracts(unittest.TestCase):
         # - Authentication checks
         # - Authorization checks
 
-        from src.db.vector_ops import (
-            InvalidEmbeddingError,
-            VectorOperationError
-        )
+        # Local imports
+        from src.db.vector_ops import InvalidEmbeddingError, VectorOperationError
 
         # Verify exception interface for validation
         self.assertTrue(issubclass(InvalidEmbeddingError, Exception))
@@ -242,13 +250,11 @@ class TestCrossCuttingConcerns(unittest.TestCase):
 
     def test_logging_isolation(self):
         """Test that logging is properly isolated."""
+        # Standard library imports
         import logging
 
         # Each domain should have its own logger
-        loggers = {
-            'src.db.pool',
-            'src.db.vector_ops'
-        }
+        loggers = {"src.db.pool", "src.db.vector_ops"}
 
         for logger_name in loggers:
             logger = logging.getLogger(logger_name)
@@ -256,15 +262,16 @@ class TestCrossCuttingConcerns(unittest.TestCase):
 
     def test_error_handling_consistency(self):
         """Test that error handling is consistent across domains."""
-        from src.db.pool import DatabaseConnectionError, DatabaseConfigurationError
-        from src.db.vector_ops import VectorOperationError, InvalidEmbeddingError
+        # Local imports
+        from src.db.pool import DatabaseConfigurationError, DatabaseConnectionError
+        from src.db.vector_ops import InvalidEmbeddingError, VectorOperationError
 
         # All custom exceptions should inherit from Exception
         exceptions = [
             DatabaseConnectionError,
             DatabaseConfigurationError,
             VectorOperationError,
-            InvalidEmbeddingError
+            InvalidEmbeddingError,
         ]
 
         for exc_class in exceptions:
@@ -281,15 +288,11 @@ class TestCrossCuttingConcerns(unittest.TestCase):
         # - Not hardcoded
         # - Validated at startup
 
+        # Standard library imports
         import os
 
         # Configuration keys should follow naming convention
-        config_keys = [
-            'RUVECTOR_HOST',
-            'RUVECTOR_PORT',
-            'RUVECTOR_DB',
-            'SHARED_KNOWLEDGE_HOST'
-        ]
+        config_keys = ["RUVECTOR_HOST", "RUVECTOR_PORT", "RUVECTOR_DB", "SHARED_KNOWLEDGE_HOST"]
 
         # Verify environment-based configuration
         for key in config_keys:

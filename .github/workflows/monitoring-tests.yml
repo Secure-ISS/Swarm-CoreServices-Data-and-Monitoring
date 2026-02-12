@@ -1,0 +1,476 @@
+name: Monitoring and Alerting Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'monitoring/**'
+      - 'prometheus/**'
+      - 'grafana/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'monitoring/**'
+      - 'prometheus/**'
+      - 'grafana/**'
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  # ============================================================================
+  # VALIDATE PROMETHEUS CONFIGURATION
+  # ============================================================================
+  validate-prometheus:
+    name: Validate Prometheus Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Prometheus
+        run: |
+          wget https://github.com/prometheus/prometheus/releases/download/v2.48.0/prometheus-2.48.0.linux-amd64.tar.gz
+          tar xvfz prometheus-*.tar.gz
+          sudo mv prometheus-*/prometheus /usr/local/bin/
+          sudo mv prometheus-*/promtool /usr/local/bin/
+
+      - name: Validate Prometheus config
+        run: |
+          promtool check config prometheus/prometheus.yml
+
+      - name: Validate recording rules
+        run: |
+          promtool check rules prometheus/rules/*.yml
+
+      - name: Validate alerting rules
+        run: |
+          promtool check rules prometheus/alerts/*.yml
+
+      - name: Test rule evaluation
+        run: |
+          promtool test rules prometheus/tests/*.yml
+
+      - name: Validate alert manager config
+        run: |
+          wget https://github.com/prometheus/alertmanager/releases/download/v0.26.0/alertmanager-0.26.0.linux-amd64.tar.gz
+          tar xvfz alertmanager-*.tar.gz
+          sudo mv alertmanager-*/amtool /usr/local/bin/
+          amtool check-config prometheus/alertmanager.yml
+
+  # ============================================================================
+  # VALIDATE GRAFANA DASHBOARDS
+  # ============================================================================
+  validate-grafana:
+    name: Validate Grafana Dashboards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Grafana dashboard linter
+        run: |
+          npm install -g @grafana/toolkit
+
+      - name: Validate dashboard JSON
+        run: |
+          for dashboard in grafana/dashboards/*.json; do
+            echo "Validating $dashboard"
+            jq empty "$dashboard" || exit 1
+          done
+
+      - name: Check dashboard best practices
+        run: |
+          python scripts/ci/validate_grafana_dashboards.py \
+            --path grafana/dashboards/ \
+            --check-variables \
+            --check-queries \
+            --check-thresholds
+
+      - name: Verify dashboard compatibility
+        run: |
+          docker run --rm \
+            -v $(pwd)/grafana/dashboards:/dashboards \
+            grafana/grafana:latest \
+            grafana-cli admin validate-dashboards /dashboards
+
+  # ============================================================================
+  # TEST PROMETHEUS RULES WITH REAL DATA
+  # ============================================================================
+  test-prometheus-rules:
+    name: Test Prometheus Rules with Simulated Data
+    runs-on: ubuntu-latest
+    services:
+      prometheus:
+        image: prom/prometheus:latest
+        ports:
+          - 9090:9090
+        volumes:
+          - ${{ github.workspace }}/prometheus:/etc/prometheus
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install prometheus-client requests pyyaml
+
+      - name: Generate test metrics
+        run: |
+          python scripts/ci/generate_test_metrics.py \
+            --duration 300 \
+            --scenarios high_load,failure,recovery
+
+      - name: Wait for Prometheus to scrape
+        run: sleep 30
+
+      - name: Query and validate metrics
+        run: |
+          python scripts/ci/test_prometheus_queries.py \
+            --prometheus-url http://localhost:9090 \
+            --test-file prometheus/tests/queries.yaml
+
+      - name: Verify alert triggering
+        run: |
+          python scripts/ci/test_alert_triggering.py \
+            --prometheus-url http://localhost:9090 \
+            --alert-file prometheus/alerts/dpg_alerts.yml
+
+  # ============================================================================
+  # TEST ALERTMANAGER ROUTING
+  # ============================================================================
+  test-alertmanager:
+    name: Test AlertManager Routing
+    runs-on: ubuntu-latest
+    services:
+      alertmanager:
+        image: prom/alertmanager:latest
+        ports:
+          - 9093:9093
+        volumes:
+          - ${{ github.workspace }}/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests pyyaml
+
+      - name: Test alert routing
+        run: |
+          python scripts/ci/test_alertmanager_routing.py \
+            --alertmanager-url http://localhost:9093 \
+            --test-cases prometheus/tests/alert_routing.yaml
+
+      - name: Test notification channels
+        run: |
+          # Test Slack webhook (dry-run mode)
+          python scripts/ci/test_notification_channels.py \
+            --channel slack \
+            --dry-run \
+            --webhook-url "${{ secrets.SLACK_WEBHOOK_TEST_URL }}"
+
+          # Test PagerDuty integration (dry-run)
+          python scripts/ci/test_notification_channels.py \
+            --channel pagerduty \
+            --dry-run \
+            --api-key "${{ secrets.PAGERDUTY_TEST_KEY }}"
+
+      - name: Test alert grouping and throttling
+        run: |
+          python scripts/ci/test_alert_grouping.py \
+            --alertmanager-url http://localhost:9093 \
+            --test-scenarios burst,sustained,intermittent
+
+  # ============================================================================
+  # INTEGRATION TEST: FULL MONITORING STACK
+  # ============================================================================
+  integration-test:
+    name: Integration Test - Full Monitoring Stack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Compose
+        run: |
+          docker-compose -f docker-compose.monitoring.yml up -d
+          sleep 30
+
+      - name: Wait for services to be ready
+        run: |
+          timeout 120 bash -c 'until curl -f http://localhost:9090/-/ready; do sleep 2; done'
+          timeout 120 bash -c 'until curl -f http://localhost:9093/-/ready; do sleep 2; done'
+          timeout 120 bash -c 'until curl -f http://localhost:3000/api/health; do sleep 2; done'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: |
+          pip install requests pytest pyyaml
+
+      - name: Run integration tests
+        run: |
+          pytest tests/monitoring/ \
+            --prometheus-url http://localhost:9090 \
+            --alertmanager-url http://localhost:9093 \
+            --grafana-url http://localhost:3000 \
+            -v
+
+      - name: Test end-to-end alert flow
+        run: |
+          # Generate high load
+          python scripts/ci/simulate_alert_scenario.py \
+            --scenario high_cpu \
+            --duration 60
+
+          # Wait for alert
+          sleep 30
+
+          # Verify alert fired
+          python scripts/ci/verify_alert_fired.py \
+            --alertmanager-url http://localhost:9093 \
+            --alert-name HighCPUUsage
+
+      - name: Test Grafana dashboard queries
+        env:
+          GRAFANA_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
+        run: |
+          python scripts/ci/test_grafana_queries.py \
+            --grafana-url http://localhost:3000 \
+            --dashboard-path grafana/dashboards/dpg_cluster.json
+
+      - name: Collect service logs
+        if: always()
+        run: |
+          docker-compose -f docker-compose.monitoring.yml logs > monitoring-logs.txt
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker-compose -f docker-compose.monitoring.yml down -v
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: monitoring-test-artifacts
+          path: |
+            monitoring-logs.txt
+            test-results/
+
+  # ============================================================================
+  # PERFORMANCE TEST: METRICS INGESTION
+  # ============================================================================
+  performance-test:
+    name: Performance Test - Metrics Ingestion
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start Prometheus
+        run: |
+          docker run -d \
+            --name prometheus-perf-test \
+            -p 9090:9090 \
+            -v $(pwd)/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml \
+            prom/prometheus:latest
+
+          sleep 10
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install prometheus-client locust
+
+      - name: Run metrics load test
+        run: |
+          python scripts/ci/metrics_load_test.py \
+            --prometheus-url http://localhost:9090 \
+            --num-series 10000 \
+            --duration 300 \
+            --scrape-interval 15
+
+      - name: Measure query performance
+        run: |
+          python scripts/ci/measure_query_performance.py \
+            --prometheus-url http://localhost:9090 \
+            --queries-file prometheus/tests/performance_queries.yaml \
+            --output performance-results.json
+
+      - name: Check performance thresholds
+        run: |
+          python scripts/ci/check_performance_thresholds.py \
+            --results performance-results.json \
+            --thresholds prometheus/tests/performance_thresholds.yaml
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: performance-results.json
+
+      - name: Cleanup
+        if: always()
+        run: docker stop prometheus-perf-test && docker rm prometheus-perf-test
+
+  # ============================================================================
+  # SECURITY SCAN: MONITORING CONFIGURATION
+  # ============================================================================
+  security-scan:
+    name: Security Scan - Monitoring Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for exposed secrets
+        run: |
+          if grep -r -i "password\|secret\|token\|api[_-]key" prometheus/ grafana/ --exclude-dir=tests; then
+            echo "ERROR: Potential secrets found in monitoring configuration"
+            exit 1
+          fi
+
+      - name: Validate TLS configuration
+        run: |
+          python scripts/ci/validate_tls_config.py \
+            --prometheus-config prometheus/prometheus.yml \
+            --alertmanager-config prometheus/alertmanager.yml
+
+      - name: Check Grafana security settings
+        run: |
+          python scripts/ci/check_grafana_security.py \
+            --config grafana/grafana.ini \
+            --check-auth \
+            --check-cors \
+            --check-ssl
+
+      - name: Scan Docker images
+        run: |
+          docker pull prom/prometheus:latest
+          docker pull prom/alertmanager:latest
+          docker pull grafana/grafana:latest
+
+          trivy image prom/prometheus:latest
+          trivy image prom/alertmanager:latest
+          trivy image grafana/grafana:latest
+
+  # ============================================================================
+  # DEPLOY MONITORING CONFIGURATION
+  # ============================================================================
+  deploy-monitoring:
+    name: Deploy Monitoring Configuration
+    runs-on: ubuntu-latest
+    needs: [validate-prometheus, validate-grafana, test-prometheus-rules, test-alertmanager, integration-test]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Set environment variables
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "CLUSTER_NAME=dpg-cluster-production" >> $GITHUB_ENV
+            echo "CONFIG_BUCKET=dpg-monitoring-prod" >> $GITHUB_ENV
+          else
+            echo "CLUSTER_NAME=dpg-cluster-staging" >> $GITHUB_ENV
+            echo "CONFIG_BUCKET=dpg-monitoring-staging" >> $GITHUB_ENV
+          fi
+
+      - name: Upload Prometheus configuration
+        run: |
+          aws s3 sync prometheus/ s3://$CONFIG_BUCKET/prometheus/ \
+            --exclude "tests/*" \
+            --exclude "*.md"
+
+      - name: Upload Grafana dashboards
+        run: |
+          aws s3 sync grafana/dashboards/ s3://$CONFIG_BUCKET/grafana/dashboards/
+
+      - name: Reload Prometheus configuration
+        run: |
+          # Get Prometheus pod name
+          PROM_POD=$(kubectl get pods -n monitoring -l app=prometheus -o jsonpath='{.items[0].metadata.name}')
+
+          # Reload configuration
+          kubectl exec -n monitoring $PROM_POD -- killall -HUP prometheus
+
+      - name: Reload AlertManager configuration
+        run: |
+          AM_POD=$(kubectl get pods -n monitoring -l app=alertmanager -o jsonpath='{.items[0].metadata.name}')
+          kubectl exec -n monitoring $AM_POD -- killall -HUP alertmanager
+
+      - name: Import Grafana dashboards
+        env:
+          GRAFANA_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
+          GRAFANA_URL: ${{ secrets.GRAFANA_URL }}
+        run: |
+          python scripts/ci/import_grafana_dashboards.py \
+            --grafana-url $GRAFANA_URL \
+            --api-key $GRAFANA_API_KEY \
+            --dashboard-path grafana/dashboards/
+
+      - name: Verify deployment
+        run: |
+          # Check Prometheus targets
+          python scripts/ci/verify_prometheus_targets.py \
+            --prometheus-url ${{ secrets.PROMETHEUS_URL }}
+
+          # Check AlertManager config
+          python scripts/ci/verify_alertmanager_config.py \
+            --alertmanager-url ${{ secrets.ALERTMANAGER_URL }}
+
+      - name: Send notification
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Monitoring configuration deployment ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Monitoring Deployment:* ${{ job.status }}\n*Environment:* ${{ env.CLUSTER_NAME }}\n*Commit:* ${{ github.sha }}"
+                  }
+                }
+              ]
+            }

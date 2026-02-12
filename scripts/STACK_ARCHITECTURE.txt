@@ -1,0 +1,258 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                    DISTRIBUTED POSTGRESQL CLUSTER                              ║
+║                        Stack Manager Architecture                              ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                           STACK MANAGEMENT LAYER                               │
+│                                                                                │
+│   ┌──────────────────────────────────────────────────────────────────────┐   │
+│   │  stack-manager.sh - Unified Control Interface                        │   │
+│   │  • Start/Stop/Restart Stacks                                         │   │
+│   │  • Health Monitoring                                                 │   │
+│   │  • Port Conflict Detection                                           │   │
+│   │  • Resource Monitoring                                               │   │
+│   │  • Interactive Menu Mode                                             │   │
+│   └──────────────────────────────────────────────────────────────────────┘   │
+│                                    │                                           │
+│                                    ▼                                           │
+│   ┌──────────────┬──────────────┬──────────────┬──────────────┬────────────┐ │
+│   │ DEV Mode     │ Citus Mode   │ Patroni Mode │ Monitor Mode │ Prod Mode  │ │
+│   │ 4GB / 1 Node │ 15GB / 4 Nodes│ 12GB / 7 Nodes│ 1.5GB / 7 Srv│ 80GB / 10+│ │
+│   └──────────────┴──────────────┴──────────────┴──────────────┴────────────┘ │
+└────────────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ MODE 1: DEVELOPMENT STACK (4GB)                                                │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│   ┌─────────────────────┐   ┌─────────────────┐   ┌──────────────────────┐  │
+│   │   PostgreSQL        │   │     Redis       │   │    PgAdmin           │  │
+│   │   RuVector          │   │     Cache       │   │    (Optional)        │  │
+│   │   Port: 5432        │   │   Port: 6379    │   │   Port: 8080         │  │
+│   │   Memory: 2.4GB     │   │   Memory: 512MB │   │   Memory: 512MB      │  │
+│   └─────────────────────┘   └─────────────────┘   └──────────────────────┘  │
+│                                                                                │
+│   Use Case: Local development, testing, quick prototyping                     │
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ MODE 2: CITUS DISTRIBUTED STACK (15GB)                                         │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│   ┌─────────────────────────────────────────────────────────────────────┐    │
+│   │                     Citus Coordinator                                │    │
+│   │                     Port: 5432 | Memory: 2GB                         │    │
+│   └──────┬──────────────────────────────────────────────────────┬───────┘    │
+│          │                                                       │            │
+│   ┌──────▼──────┐     ┌──────────────┐     ┌──────────────┐   │            │
+│   │  Worker 1   │     │   Worker 2   │     │   Worker 3   │   │            │
+│   │  Port: 5433 │     │  Port: 5434  │     │  Port: 5435  │   │            │
+│   │  Memory: 4GB│     │  Memory: 4GB │     │  Memory: 4GB │   │            │
+│   └─────────────┘     └──────────────┘     └──────────────┘   │            │
+│                                                                 │            │
+│   ┌─────────────────┐                        ┌────────────────▼──────┐      │
+│   │     Redis       │                        │     PgAdmin            │      │
+│   │   Port: 6379    │                        │   Port: 8080 (Opt)     │      │
+│   └─────────────────┘                        └────────────────────────┘      │
+│                                                                                │
+│   Use Case: Horizontal scaling, distributed queries, sharding                 │
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ MODE 3: PATRONI HIGH-AVAILABILITY STACK (12GB)                                 │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│   ┌────────────────────── etcd Cluster ──────────────────────────┐           │
+│   │  etcd-1 (2GB)    etcd-2 (2GB)    etcd-3 (2GB)                │           │
+│   │  Distributed Consensus & Coordination Layer                  │           │
+│   └───────────────────────────────────────────────────────────────┘           │
+│                               │                                                │
+│   ┌───────────────────────────▼────────────────────────────────┐             │
+│   │              Patroni PostgreSQL Cluster                     │             │
+│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │             │
+│   │  │  Patroni-1   │  │  Patroni-2   │  │  Patroni-3   │    │             │
+│   │  │   PRIMARY    │  │   STANDBY    │  │   STANDBY    │    │             │
+│   │  │  Port: 5432  │  │  Port: 5433  │  │  Port: 5434  │    │             │
+│   │  │  API: 8008   │  │  API: 8009   │  │  API: 8010   │    │             │
+│   │  └──────────────┘  └──────────────┘  └──────────────┘    │             │
+│   └──────────────────────────────────────────────────────────┘              │
+│                               │                                                │
+│   ┌───────────────────────────▼────────────────────────────────┐             │
+│   │                        HAProxy                              │             │
+│   │  Port 5000: Primary (Read-Write)                           │             │
+│   │  Port 5001: Replicas (Read-Only)                           │             │
+│   │  Port 7000: Statistics Dashboard                           │             │
+│   └─────────────────────────────────────────────────────────────┘             │
+│                                                                                │
+│   Features: Automatic failover, synchronous replication, load balancing       │
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ MODE 4: MONITORING STACK (1.5GB)                                               │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│   ┌─────────────────────────────────────────────────────────────────────┐    │
+│   │                         Prometheus                                  │    │
+│   │         Metrics Collection & Storage (Port: 9090)                   │    │
+│   └─────┬───────────────────────────────────────────────────────────────┘    │
+│         │                                                                     │
+│   ┌─────▼──────┐  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐    │
+│   │ Postgres   │  │   Redis     │  │    Node      │  │      App      │    │
+│   │ Exporter   │  │  Exporter   │  │   Exporter   │  │   Exporter    │    │
+│   │ Port: 9187 │  │ Port: 9121  │  │  Port: 9100  │  │  Port: 9999   │    │
+│   └────────────┘  └─────────────┘  └──────────────┘  └───────────────┘    │
+│                                                                                │
+│   ┌─────────────────────┐          ┌────────────────────────────────┐       │
+│   │      Grafana        │          │      AlertManager              │       │
+│   │  Dashboards & Viz   │          │   Alert Routing & Notify       │       │
+│   │   Port: 3000        │          │      Port: 9093                │       │
+│   └─────────────────────┘          └────────────────────────────────┘       │
+│                                                                                │
+│   Dashboards: Cluster health, query performance, resource usage, alerts       │
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ MODE 5: PRODUCTION STACK (80GB+)                                               │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│   ┌─────────────────── Consensus Layer ────────────────────┐                 │
+│   │  etcd-1      etcd-2      etcd-3                         │                 │
+│   │  (Distributed coordination & leader election)           │                 │
+│   └─────────────────────────────────────────────────────────┘                 │
+│                              │                                                 │
+│   ┌──────────────────────────▼─────────────────────────────┐                 │
+│   │         Patroni PostgreSQL HA Cluster (3 nodes)        │                 │
+│   │  • Automatic failover                                  │                 │
+│   │  • Synchronous replication                             │                 │
+│   │  • SSL/TLS encryption                                  │                 │
+│   └──────────────────────────┬─────────────────────────────┘                 │
+│                              │                                                 │
+│   ┌──────────────────────────▼─────────────────────────────┐                 │
+│   │              Load Balancing Layer                      │                 │
+│   │  ┌────────────────┐         ┌────────────────┐        │                 │
+│   │  │   HAProxy 1    │         │   HAProxy 2    │        │                 │
+│   │  │ (Active/Backup)│         │ (Active/Backup)│        │                 │
+│   │  └────────────────┘         └────────────────┘        │                 │
+│   └────────────────────────────────────────────────────────┘                 │
+│                              │                                                 │
+│   ┌──────────────────────────▼─────────────────────────────┐                 │
+│   │          Connection Pooling Layer                      │                 │
+│   │  ┌────────────────┐         ┌────────────────┐        │                 │
+│   │  │  PgBouncer 1   │         │  PgBouncer 2   │        │                 │
+│   │  │  Port: 6432    │         │  Port: 6432    │        │                 │
+│   │  └────────────────┘         └────────────────┘        │                 │
+│   └────────────────────────────────────────────────────────┘                 │
+│                                                                                │
+│   ┌───────────────────┐  ┌────────────────────────────────┐                 │
+│   │  Redis Sentinel   │  │   Monitoring & Observability    │                 │
+│   │  Cluster (Cache)  │  │   Prometheus + Grafana          │                 │
+│   │  Port: 6379       │  │   Ports: 9090, 3001             │                 │
+│   └───────────────────┘  └────────────────────────────────┘                 │
+│                                                                                │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                    Automated Backup Agent                           │   │
+│   │  • Daily backups (2 AM)                                             │   │
+│   │  • 30-day retention                                                 │   │
+│   │  • Compression & encryption                                         │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                                │
+│   Deployment: Docker Swarm with node labels, secrets, SSL, rolling updates    │
+└────────────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════════
+
+STACK MANAGER WORKFLOW
+───────────────────────
+
+                    ┌────────────────────────────┐
+                    │    User/Administrator      │
+                    └────────────┬───────────────┘
+                                 │
+                    ┌────────────▼───────────────┐
+                    │   stack-manager.sh         │
+                    │   • Commands               │
+                    │   • Validation             │
+                    │   • Error Handling         │
+                    └────────────┬───────────────┘
+                                 │
+        ┌────────────────────────┼────────────────────────┐
+        │                        │                        │
+        ▼                        ▼                        ▼
+┌───────────────┐      ┌─────────────────┐      ┌──────────────────┐
+│ Port Conflict │      │ Health Checks   │      │ Resource Monitor │
+│   Detection   │      │   & Validation  │      │   CPU/Mem/Disk   │
+└───────┬───────┘      └────────┬────────┘      └────────┬─────────┘
+        │                       │                         │
+        └───────────────────────┼─────────────────────────┘
+                                │
+                    ┌───────────▼────────────┐
+                    │   Docker Compose       │
+                    │   • Start/Stop         │
+                    │   • Health Checks      │
+                    └───────────┬────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        │                       │                       │
+        ▼                       ▼                       ▼
+┌──────────────┐      ┌──────────────┐      ┌───────────────┐
+│  Container   │      │  Container   │      │  Container    │
+│  Service 1   │      │  Service 2   │      │  Service N    │
+└──────────────┘      └──────────────┘      └───────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════════
+
+KEY FEATURES
+────────────
+
+┌─────────────────────────────────────────────────────────────────────┐
+│  ✓ Unified Control        Single interface for all deployment modes │
+│  ✓ Conflict Detection     Automatic port and resource conflicts     │
+│  ✓ Health Monitoring      Service health and container status       │
+│  ✓ Interactive Mode       Menu-driven interface                     │
+│  ✓ Tab Completion         Bash completion support                   │
+│  ✓ Comprehensive Logging  All operations logged                     │
+│  ✓ Error Handling         Graceful failure and recovery             │
+│  ✓ Resource Tracking      CPU, memory, disk usage                   │
+│  ✓ Quick Access           Convenient aliases                        │
+│  ✓ Well Documented        Complete guides and references            │
+└─────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════════
+
+COMMAND FLOW EXAMPLE
+────────────────────
+
+./scripts/stack-manager.sh start dev
+          │
+          ├─► Validate mode (dev exists?)
+          ├─► Check Docker running
+          ├─► Detect running stacks
+          ├─► Check port conflicts (5432, 6379, 8080)
+          │     ├─► Port free? Continue
+          │     └─► Port busy? Offer to stop conflicting stack
+          ├─► Pull latest images
+          ├─► Start containers (docker-compose up -d)
+          ├─► Wait for health checks (60s timeout)
+          ├─► Display status and URLs
+          ├─► Log all operations
+          └─► Success ✓
+
+═══════════════════════════════════════════════════════════════════════════════════
+
+QUICK COMMAND REFERENCE
+───────────────────────
+
+Start:      ./scripts/stack-manager.sh start <mode> [--tools]
+Stop:       ./scripts/stack-manager.sh stop <mode> [--force]
+Restart:    ./scripts/stack-manager.sh restart <mode>
+Status:     ./scripts/stack-manager.sh status
+Logs:       ./scripts/stack-manager.sh logs <mode> [--follow]
+Clean:      ./scripts/stack-manager.sh clean <mode>
+Menu:       ./scripts/stack-manager.sh interactive
+
+Modes:      dev | citus | patroni | monitoring | production
+
+═══════════════════════════════════════════════════════════════════════════════════

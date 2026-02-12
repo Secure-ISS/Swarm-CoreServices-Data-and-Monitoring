@@ -8,16 +8,17 @@ Tests for event bus functionality including:
 - Event persistence and replay
 """
 
+# Standard library imports
 import os
 import sys
-import unittest
-from unittest.mock import Mock, MagicMock, patch
-from typing import Dict, Any, List, Callable
-import time
 import threading
+import time
+import unittest
+from typing import Any, Callable, Dict, List
+from unittest.mock import MagicMock, Mock, patch
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 
 class TestEventBusBasics(unittest.TestCase):
@@ -25,57 +26,46 @@ class TestEventBusBasics(unittest.TestCase):
 
     def setUp(self):
         """Set up event bus mock."""
-        self.event_bus = {
-            'subscribers': {},
-            'events': [],
-            'lock': threading.Lock()
-        }
+        self.event_bus = {"subscribers": {}, "events": [], "lock": threading.Lock()}
 
     def test_event_structure(self):
         """Test event data structure."""
         event = {
-            'type': 'memory.stored',
-            'timestamp': time.time(),
-            'data': {
-                'namespace': 'test',
-                'key': 'test_key',
-                'value': 'test_value'
-            },
-            'metadata': {
-                'source': 'vector_ops',
-                'user': 'system'
-            }
+            "type": "memory.stored",
+            "timestamp": time.time(),
+            "data": {"namespace": "test", "key": "test_key", "value": "test_value"},
+            "metadata": {"source": "vector_ops", "user": "system"},
         }
 
         # Validate event structure
-        required_fields = ['type', 'timestamp', 'data']
+        required_fields = ["type", "timestamp", "data"]
         for field in required_fields:
             self.assertIn(field, event)
 
-        self.assertIsInstance(event['timestamp'], float)
-        self.assertIsInstance(event['data'], dict)
+        self.assertIsInstance(event["timestamp"], float)
+        self.assertIsInstance(event["data"], dict)
 
     def test_event_type_naming(self):
         """Test event type naming conventions."""
         valid_event_types = [
-            'memory.stored',
-            'memory.retrieved',
-            'memory.deleted',
-            'agent.spawned',
-            'agent.terminated',
-            'swarm.initialized',
-            'query.executed',
-            'connection.established',
-            'connection.failed'
+            "memory.stored",
+            "memory.retrieved",
+            "memory.deleted",
+            "agent.spawned",
+            "agent.terminated",
+            "swarm.initialized",
+            "query.executed",
+            "connection.established",
+            "connection.failed",
         ]
 
         for event_type in valid_event_types:
             # Event types should be lowercase with dots
             self.assertTrue(event_type.islower())
-            self.assertIn('.', event_type)
+            self.assertIn(".", event_type)
 
             # Should have domain and action
-            parts = event_type.split('.')
+            parts = event_type.split(".")
             self.assertGreaterEqual(len(parts), 2)
 
 
@@ -87,11 +77,7 @@ class TestEventPublishing(unittest.TestCase):
         self.events = []
 
         def publish(event_type: str, data: Dict[str, Any]):
-            event = {
-                'type': event_type,
-                'timestamp': time.time(),
-                'data': data
-            }
+            event = {"type": event_type, "timestamp": time.time(), "data": data}
             self.events.append(event)
             return event
 
@@ -99,30 +85,30 @@ class TestEventPublishing(unittest.TestCase):
 
     def test_publish_event(self):
         """Test publishing an event."""
-        event = self.publish('test.event', {'key': 'value'})
+        event = self.publish("test.event", {"key": "value"})
 
         self.assertEqual(len(self.events), 1)
-        self.assertEqual(event['type'], 'test.event')
-        self.assertEqual(event['data']['key'], 'value')
+        self.assertEqual(event["type"], "test.event")
+        self.assertEqual(event["data"]["key"], "value")
 
     def test_publish_multiple_events(self):
         """Test publishing multiple events."""
         for i in range(10):
-            self.publish(f'test.event.{i}', {'index': i})
+            self.publish(f"test.event.{i}", {"index": i})
 
         self.assertEqual(len(self.events), 10)
 
         # Verify order
         for i, event in enumerate(self.events):
-            self.assertEqual(event['data']['index'], i)
+            self.assertEqual(event["data"]["index"], i)
 
     def test_event_timestamp_ordering(self):
         """Test that events have increasing timestamps."""
         timestamps = []
 
         for i in range(5):
-            event = self.publish('test.event', {'index': i})
-            timestamps.append(event['timestamp'])
+            event = self.publish("test.event", {"index": i})
+            timestamps.append(event["timestamp"])
             time.sleep(0.01)
 
         # Timestamps should be increasing
@@ -146,11 +132,7 @@ class TestEventSubscription(unittest.TestCase):
 
     def publish(self, event_type: str, data: Dict[str, Any]):
         """Publish event and notify subscribers."""
-        event = {
-            'type': event_type,
-            'timestamp': time.time(),
-            'data': data
-        }
+        event = {"type": event_type, "timestamp": time.time(), "data": data}
         self.events.append(event)
 
         # Notify subscribers
@@ -167,21 +149,21 @@ class TestEventSubscription(unittest.TestCase):
         def handler(event):
             received_events.append(event)
 
-        self.subscribe('test.event', handler)
-        self.publish('test.event', {'key': 'value'})
+        self.subscribe("test.event", handler)
+        self.publish("test.event", {"key": "value"})
 
         self.assertEqual(len(received_events), 1)
-        self.assertEqual(received_events[0]['data']['key'], 'value')
+        self.assertEqual(received_events[0]["data"]["key"], "value")
 
     def test_multiple_subscribers(self):
         """Test multiple subscribers to same event."""
         received_1 = []
         received_2 = []
 
-        self.subscribe('test.event', lambda e: received_1.append(e))
-        self.subscribe('test.event', lambda e: received_2.append(e))
+        self.subscribe("test.event", lambda e: received_1.append(e))
+        self.subscribe("test.event", lambda e: received_2.append(e))
 
-        self.publish('test.event', {'key': 'value'})
+        self.publish("test.event", {"key": "value"})
 
         self.assertEqual(len(received_1), 1)
         self.assertEqual(len(received_2), 1)
@@ -195,12 +177,12 @@ class TestEventSubscription(unittest.TestCase):
             all_events.append(event)
 
         # Simulate wildcard by subscribing to multiple types
-        for event_type in ['memory.stored', 'memory.retrieved', 'memory.deleted']:
+        for event_type in ["memory.stored", "memory.retrieved", "memory.deleted"]:
             self.subscribe(event_type, wildcard_handler)
 
-        self.publish('memory.stored', {'key': 'key1'})
-        self.publish('memory.retrieved', {'key': 'key2'})
-        self.publish('memory.deleted', {'key': 'key3'})
+        self.publish("memory.stored", {"key": "key1"})
+        self.publish("memory.retrieved", {"key": "key2"})
+        self.publish("memory.deleted", {"key": "key3"})
 
         self.assertEqual(len(all_events), 3)
 
@@ -212,17 +194,17 @@ class TestEventSubscription(unittest.TestCase):
             received.append(event)
 
         # Subscribe
-        self.subscribe('test.event', handler)
+        self.subscribe("test.event", handler)
 
         # Publish event
-        self.publish('test.event', {'num': 1})
+        self.publish("test.event", {"num": 1})
         self.assertEqual(len(received), 1)
 
         # Unsubscribe
-        self.subscribers['test.event'].remove(handler)
+        self.subscribers["test.event"].remove(handler)
 
         # Publish again
-        self.publish('test.event', {'num': 2})
+        self.publish("test.event", {"num": 2})
 
         # Should still have only 1 event
         self.assertEqual(len(received), 1)
@@ -235,14 +217,11 @@ class TestEventFiltering(unittest.TestCase):
         """Set up event bus with filtering."""
         self.events = []
 
-    def publish_with_filter(self, event_type: str, data: Dict[str, Any],
-                           filter_func: Callable = None):
+    def publish_with_filter(
+        self, event_type: str, data: Dict[str, Any], filter_func: Callable = None
+    ):
         """Publish event with optional filter."""
-        event = {
-            'type': event_type,
-            'timestamp': time.time(),
-            'data': data
-        }
+        event = {"type": event_type, "timestamp": time.time(), "data": data}
 
         if filter_func is None or filter_func(event):
             self.events.append(event)
@@ -251,42 +230,36 @@ class TestEventFiltering(unittest.TestCase):
 
     def test_filter_by_namespace(self):
         """Test filtering events by namespace."""
+
         def namespace_filter(event):
-            return event['data'].get('namespace') == 'important'
+            return event["data"].get("namespace") == "important"
 
         self.publish_with_filter(
-            'memory.stored',
-            {'namespace': 'important', 'key': 'key1'},
-            namespace_filter
+            "memory.stored", {"namespace": "important", "key": "key1"}, namespace_filter
         )
 
         self.publish_with_filter(
-            'memory.stored',
-            {'namespace': 'other', 'key': 'key2'},
-            namespace_filter
+            "memory.stored", {"namespace": "other", "key": "key2"}, namespace_filter
         )
 
         # Only important namespace should be stored
         self.assertEqual(len(self.events), 1)
-        self.assertEqual(self.events[0]['data']['namespace'], 'important')
+        self.assertEqual(self.events[0]["data"]["namespace"], "important")
 
     def test_filter_by_priority(self):
         """Test filtering events by priority."""
+
         def priority_filter(event):
-            return event['data'].get('priority', 0) >= 5
+            return event["data"].get("priority", 0) >= 5
 
         for i in range(10):
-            self.publish_with_filter(
-                'test.event',
-                {'priority': i},
-                priority_filter
-            )
+            self.publish_with_filter("test.event", {"priority": i}, priority_filter)
 
         # Only events with priority >= 5
         self.assertEqual(len(self.events), 5)
 
         for event in self.events:
-            self.assertGreaterEqual(event['data']['priority'], 5)
+            self.assertGreaterEqual(event["data"]["priority"], 5)
 
     def test_filter_by_timestamp(self):
         """Test filtering events by timestamp."""
@@ -294,21 +267,13 @@ class TestEventFiltering(unittest.TestCase):
         time.sleep(0.01)
 
         def time_filter(event):
-            return event['timestamp'] > cutoff
+            return event["timestamp"] > cutoff
 
         # Old event (should be filtered out)
-        old_event = {
-            'type': 'test.event',
-            'timestamp': cutoff - 1,
-            'data': {}
-        }
+        old_event = {"type": "test.event", "timestamp": cutoff - 1, "data": {}}
 
         # New event (should pass filter)
-        new_event = {
-            'type': 'test.event',
-            'timestamp': time.time(),
-            'data': {}
-        }
+        new_event = {"type": "test.event", "timestamp": time.time(), "data": {}}
 
         self.assertTrue(time_filter(new_event))
         self.assertFalse(time_filter(old_event))
@@ -319,6 +284,7 @@ class TestAsyncEventHandling(unittest.TestCase):
 
     def test_async_event_handler(self):
         """Test asynchronous event handling."""
+        # Standard library imports
         import queue
 
         event_queue = queue.Queue()
@@ -347,7 +313,7 @@ class TestAsyncEventHandling(unittest.TestCase):
 
         # Queue events
         for i in range(5):
-            event = {'type': 'test.event', 'data': {'index': i}}
+            event = {"type": "test.event", "data": {"index": i}}
             event_queue.put(event)
 
         # Wait for completion
@@ -359,8 +325,9 @@ class TestAsyncEventHandling(unittest.TestCase):
 
     def test_concurrent_event_processing(self):
         """Test concurrent event processing."""
-        import queue
+        # Standard library imports
         import concurrent.futures
+        import queue
 
         event_queue = queue.Queue()
         processed = []
@@ -373,10 +340,7 @@ class TestAsyncEventHandling(unittest.TestCase):
                 processed.append(event)
 
         # Queue events
-        events = [
-            {'type': 'test.event', 'data': {'index': i}}
-            for i in range(10)
-        ]
+        events = [{"type": "test.event", "data": {"index": i}} for i in range(10)]
 
         # Process concurrently
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
@@ -402,19 +366,12 @@ class TestEventPersistence(unittest.TestCase):
         if from_timestamp is None:
             return self.event_store.copy()
 
-        return [
-            e for e in self.event_store
-            if e['timestamp'] >= from_timestamp
-        ]
+        return [e for e in self.event_store if e["timestamp"] >= from_timestamp]
 
     def test_event_storage(self):
         """Test storing events."""
         for i in range(5):
-            event = {
-                'type': 'test.event',
-                'timestamp': time.time(),
-                'data': {'index': i}
-            }
+            event = {"type": "test.event", "timestamp": time.time(), "data": {"index": i}}
             self.store_event(event)
 
         self.assertEqual(len(self.event_store), 5)
@@ -423,11 +380,7 @@ class TestEventPersistence(unittest.TestCase):
         """Test replaying all events."""
         # Store events
         for i in range(5):
-            event = {
-                'type': 'test.event',
-                'timestamp': time.time(),
-                'data': {'index': i}
-            }
+            event = {"type": "test.event", "timestamp": time.time(), "data": {"index": i}}
             self.store_event(event)
 
         # Replay all
@@ -435,19 +388,15 @@ class TestEventPersistence(unittest.TestCase):
 
         self.assertEqual(len(replayed), 5)
         for i, event in enumerate(replayed):
-            self.assertEqual(event['data']['index'], i)
+            self.assertEqual(event["data"]["index"], i)
 
     def test_event_replay_from_timestamp(self):
         """Test replaying events from a specific timestamp."""
         # Store events with delays
         timestamps = []
         for i in range(5):
-            event = {
-                'type': 'test.event',
-                'timestamp': time.time(),
-                'data': {'index': i}
-            }
-            timestamps.append(event['timestamp'])
+            event = {"type": "test.event", "timestamp": time.time(), "data": {"index": i}}
+            timestamps.append(event["timestamp"])
             self.store_event(event)
             time.sleep(0.01)
 
@@ -457,7 +406,7 @@ class TestEventPersistence(unittest.TestCase):
 
         # Should get events 2, 3, 4
         self.assertEqual(len(replayed), 3)
-        self.assertEqual(replayed[0]['data']['index'], 2)
+        self.assertEqual(replayed[0]["data"]["index"], 2)
 
 
 def run_event_bus_tests():

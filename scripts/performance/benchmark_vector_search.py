@@ -7,23 +7,27 @@ Benchmarks:
 - Bulk insert operations
 - Concurrent query performance
 """
+# Standard library imports
 import asyncio
+import json
+import os
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List
+
+# Third-party imports
 import asyncpg
 import numpy as np
-import time
-import sys
-import os
-from pathlib import Path
-from typing import List, Dict
-import json
-from datetime import datetime
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# Third-party imports
 from dotenv import load_dotenv
 
 # Load environment
-load_dotenv(Path(__file__).parent.parent.parent / '.env')
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
 class VectorSearchBenchmark:
@@ -38,10 +42,7 @@ class VectorSearchBenchmark:
         """Setup benchmark database connection pool."""
         print("🔧 Setting up connection pool...")
         self.pool = await asyncpg.create_pool(
-            self.conn_string,
-            min_size=10,
-            max_size=50,
-            command_timeout=60
+            self.conn_string, min_size=10, max_size=50, command_timeout=60
         )
         print("   ✓ Connection pool ready")
 
@@ -75,7 +76,8 @@ class VectorSearchBenchmark:
             try:
                 async with self.pool.acquire() as conn:
                     embedding_str = f"[{','.join(str(v) for v in query_embedding)}]"
-                    results = await conn.fetch("""
+                    results = await conn.fetch(
+                        """
                         SELECT namespace, key, value, metadata,
                                1 - (embedding <=> $1::ruvector) as similarity
                         FROM memory_entries
@@ -83,7 +85,10 @@ class VectorSearchBenchmark:
                           AND embedding IS NOT NULL
                         ORDER BY embedding <=> $1::ruvector
                         LIMIT 10
-                    """, embedding_str, namespace)
+                    """,
+                        embedding_str,
+                        namespace,
+                    )
 
                 latency = (time.perf_counter() - start) * 1000  # ms
                 latencies.append(latency)
@@ -102,17 +107,17 @@ class VectorSearchBenchmark:
 
         latencies.sort()
         stats = {
-            'operation': 'single_shard_search',
-            'iterations': len(latencies),
-            'min_ms': latencies[0],
-            'max_ms': latencies[-1],
-            'mean_ms': np.mean(latencies),
-            'median_ms': np.median(latencies),
-            'p50_ms': np.percentile(latencies, 50),
-            'p95_ms': np.percentile(latencies, 95),
-            'p99_ms': np.percentile(latencies, 99),
-            'p99_9_ms': np.percentile(latencies, 99.9),
-            'qps': len(latencies) / (sum(latencies) / 1000)
+            "operation": "single_shard_search",
+            "iterations": len(latencies),
+            "min_ms": latencies[0],
+            "max_ms": latencies[-1],
+            "mean_ms": np.mean(latencies),
+            "median_ms": np.median(latencies),
+            "p50_ms": np.percentile(latencies, 50),
+            "p95_ms": np.percentile(latencies, 95),
+            "p99_ms": np.percentile(latencies, 99),
+            "p99_9_ms": np.percentile(latencies, 99.9),
+            "qps": len(latencies) / (sum(latencies) / 1000),
         }
 
         self.results.append(stats)
@@ -144,7 +149,8 @@ class VectorSearchBenchmark:
             try:
                 async with self.pool.acquire() as conn:
                     embedding_str = f"[{','.join(str(v) for v in query_embedding)}]"
-                    results = await conn.fetch("""
+                    results = await conn.fetch(
+                        """
                         SELECT namespace, key, value, metadata,
                                1 - (embedding <=> $1::ruvector) as similarity
                         FROM memory_entries
@@ -152,7 +158,10 @@ class VectorSearchBenchmark:
                           AND embedding IS NOT NULL
                         ORDER BY embedding <=> $1::ruvector
                         LIMIT 20
-                    """, embedding_str, namespaces)
+                    """,
+                        embedding_str,
+                        namespaces,
+                    )
 
                 latency = (time.perf_counter() - start) * 1000
                 latencies.append(latency)
@@ -170,18 +179,18 @@ class VectorSearchBenchmark:
 
         latencies.sort()
         stats = {
-            'operation': 'cross_shard_search',
-            'iterations': len(latencies),
-            'namespaces': 5,
-            'min_ms': latencies[0],
-            'max_ms': latencies[-1],
-            'mean_ms': np.mean(latencies),
-            'median_ms': np.median(latencies),
-            'p50_ms': np.percentile(latencies, 50),
-            'p95_ms': np.percentile(latencies, 95),
-            'p99_ms': np.percentile(latencies, 99),
-            'p99_9_ms': np.percentile(latencies, 99.9),
-            'qps': len(latencies) / (sum(latencies) / 1000)
+            "operation": "cross_shard_search",
+            "iterations": len(latencies),
+            "namespaces": 5,
+            "min_ms": latencies[0],
+            "max_ms": latencies[-1],
+            "mean_ms": np.mean(latencies),
+            "median_ms": np.median(latencies),
+            "p50_ms": np.percentile(latencies, 50),
+            "p95_ms": np.percentile(latencies, 95),
+            "p99_ms": np.percentile(latencies, 99),
+            "p99_9_ms": np.percentile(latencies, 99.9),
+            "qps": len(latencies) / (sum(latencies) / 1000),
         }
 
         self.results.append(stats)
@@ -209,13 +218,15 @@ class VectorSearchBenchmark:
             batch = []
             for j in range(batch_size):
                 embedding = np.random.randn(384).tolist()
-                batch.append({
-                    'namespace': 'benchmark-namespace',
-                    'key': f'bulk-insert-{i}-{j}',
-                    'value': f'Benchmark value {i}-{j}',
-                    'embedding': embedding,
-                    'metadata': {'batch': i, 'index': j}
-                })
+                batch.append(
+                    {
+                        "namespace": "benchmark-namespace",
+                        "key": f"bulk-insert-{i}-{j}",
+                        "value": f"Benchmark value {i}-{j}",
+                        "embedding": embedding,
+                        "metadata": {"batch": i, "index": j},
+                    }
+                )
 
             start = time.perf_counter()
 
@@ -224,7 +235,8 @@ class VectorSearchBenchmark:
                     async with conn.transaction():
                         for item in batch:
                             embedding_str = f"[{','.join(str(v) for v in item['embedding'])}]"
-                            await conn.execute("""
+                            await conn.execute(
+                                """
                                 INSERT INTO memory_entries
                                     (namespace, key, value, embedding, metadata)
                                 VALUES ($1, $2, $3, $4::ruvector, $5::jsonb)
@@ -233,8 +245,13 @@ class VectorSearchBenchmark:
                                     embedding = EXCLUDED.embedding,
                                     metadata = EXCLUDED.metadata,
                                     updated_at = NOW()
-                            """, item['namespace'], item['key'], item['value'],
-                                embedding_str, json.dumps(item['metadata']))
+                            """,
+                                item["namespace"],
+                                item["key"],
+                                item["value"],
+                                embedding_str,
+                                json.dumps(item["metadata"]),
+                            )
 
                 latency = (time.perf_counter() - start) * 1000
                 latencies.append(latency)
@@ -255,19 +272,19 @@ class VectorSearchBenchmark:
         total_time_sec = sum(latencies) / 1000
 
         stats = {
-            'operation': 'bulk_insert',
-            'batch_size': batch_size,
-            'iterations': len(latencies),
-            'total_rows': total_rows,
-            'min_ms': latencies[0],
-            'max_ms': latencies[-1],
-            'mean_ms': np.mean(latencies),
-            'median_ms': np.median(latencies),
-            'p50_ms': np.percentile(latencies, 50),
-            'p95_ms': np.percentile(latencies, 95),
-            'p99_ms': np.percentile(latencies, 99),
-            'throughput_tps': total_rows / total_time_sec,
-            'throughput_rows_per_sec': total_rows / total_time_sec
+            "operation": "bulk_insert",
+            "batch_size": batch_size,
+            "iterations": len(latencies),
+            "total_rows": total_rows,
+            "min_ms": latencies[0],
+            "max_ms": latencies[-1],
+            "mean_ms": np.mean(latencies),
+            "median_ms": np.median(latencies),
+            "p50_ms": np.percentile(latencies, 50),
+            "p95_ms": np.percentile(latencies, 95),
+            "p99_ms": np.percentile(latencies, 99),
+            "throughput_tps": total_rows / total_time_sec,
+            "throughput_rows_per_sec": total_rows / total_time_sec,
         }
 
         self.results.append(stats)
@@ -300,7 +317,8 @@ class VectorSearchBenchmark:
                 try:
                     async with self.pool.acquire() as conn:
                         embedding_str = f"[{','.join(str(v) for v in query_embedding)}]"
-                        await conn.fetch("""
+                        await conn.fetch(
+                            """
                             SELECT namespace, key, value,
                                    1 - (embedding <=> $1::ruvector) as similarity
                             FROM memory_entries
@@ -308,7 +326,10 @@ class VectorSearchBenchmark:
                               AND embedding IS NOT NULL
                             ORDER BY embedding <=> $1::ruvector
                             LIMIT 10
-                        """, embedding_str, namespace)
+                        """,
+                            embedding_str,
+                            namespace,
+                        )
 
                     latency = (time.perf_counter() - start) * 1000
                     latencies.append(latency)
@@ -338,19 +359,19 @@ class VectorSearchBenchmark:
         successful_queries = len(all_latencies)
 
         stats = {
-            'operation': 'concurrent_queries',
-            'concurrency': concurrency,
-            'queries_per_client': queries_per_client,
-            'total_queries': successful_queries,
-            'total_duration_sec': total_duration,
-            'min_ms': all_latencies[0],
-            'max_ms': all_latencies[-1],
-            'mean_ms': np.mean(all_latencies),
-            'median_ms': np.median(all_latencies),
-            'p50_ms': np.percentile(all_latencies, 50),
-            'p95_ms': np.percentile(all_latencies, 95),
-            'p99_ms': np.percentile(all_latencies, 99),
-            'throughput_qps': successful_queries / total_duration
+            "operation": "concurrent_queries",
+            "concurrency": concurrency,
+            "queries_per_client": queries_per_client,
+            "total_queries": successful_queries,
+            "total_duration_sec": total_duration,
+            "min_ms": all_latencies[0],
+            "max_ms": all_latencies[-1],
+            "mean_ms": np.mean(all_latencies),
+            "median_ms": np.median(all_latencies),
+            "p50_ms": np.percentile(all_latencies, 50),
+            "p95_ms": np.percentile(all_latencies, 95),
+            "p99_ms": np.percentile(all_latencies, 99),
+            "throughput_qps": successful_queries / total_duration,
         }
 
         self.results.append(stats)
@@ -363,7 +384,7 @@ class VectorSearchBenchmark:
         print("\n   📊 Results:")
         print(f"   {'─'*56}")
 
-        if 'min_ms' in stats:
+        if "min_ms" in stats:
             print(f"   {'Latency (ms)':<30} {'Value':>20}")
             print(f"   {'─'*56}")
             print(f"   {'  Min':<30} {stats['min_ms']:>20.2f}")
@@ -373,19 +394,19 @@ class VectorSearchBenchmark:
             print(f"   {'  p50':<30} {stats['p50_ms']:>20.2f}")
             print(f"   {'  p95':<30} {stats['p95_ms']:>20.2f}")
             print(f"   {'  p99':<30} {stats['p99_ms']:>20.2f}")
-            if 'p99_9_ms' in stats:
+            if "p99_9_ms" in stats:
                 print(f"   {'  p99.9':<30} {stats['p99_9_ms']:>20.2f}")
 
-        if 'qps' in stats:
+        if "qps" in stats:
             print(f"   {'─'*56}")
             print(f"   {'Throughput (QPS)':<30} {stats['qps']:>20.0f}")
 
-        if 'throughput_tps' in stats:
+        if "throughput_tps" in stats:
             print(f"   {'─'*56}")
             print(f"   {'Throughput (TPS)':<30} {stats['throughput_tps']:>20.0f}")
             print(f"   {'Throughput (rows/sec)':<30} {stats['throughput_rows_per_sec']:>20.0f}")
 
-        if 'throughput_qps' in stats:
+        if "throughput_qps" in stats:
             print(f"   {'─'*56}")
             print(f"   {'Concurrent Throughput (QPS)':<30} {stats['throughput_qps']:>20.0f}")
             print(f"   {'Total Duration (sec)':<30} {stats['total_duration_sec']:>20.2f}")
@@ -395,19 +416,19 @@ class VectorSearchBenchmark:
     def save_results(self, filepath: str):
         """Save benchmark results to JSON."""
         output = {
-            'timestamp': datetime.now().isoformat(),
-            'connection': {
-                'host': os.getenv('RUVECTOR_HOST', 'localhost'),
-                'port': int(os.getenv('RUVECTOR_PORT', '5432')),
-                'database': os.getenv('RUVECTOR_DB')
+            "timestamp": datetime.now().isoformat(),
+            "connection": {
+                "host": os.getenv("RUVECTOR_HOST", "localhost"),
+                "port": int(os.getenv("RUVECTOR_PORT", "5432")),
+                "database": os.getenv("RUVECTOR_DB"),
             },
-            'results': self.results
+            "results": self.results,
         }
 
         # Ensure directory exists
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
 
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             json.dump(output, f, indent=2)
 
         print(f"\n📊 Results saved to {filepath}")
@@ -419,13 +440,13 @@ class VectorSearchBenchmark:
         print(f"{'='*60}")
 
         for result in self.results:
-            op = result['operation']
+            op = result["operation"]
             print(f"\n{op.replace('_', ' ').title()}:")
-            if 'p95_ms' in result:
+            if "p95_ms" in result:
                 print(f"  p95 latency: {result['p95_ms']:.2f} ms")
-            if 'qps' in result:
+            if "qps" in result:
                 print(f"  Throughput:  {result['qps']:.0f} QPS")
-            if 'throughput_tps' in result:
+            if "throughput_tps" in result:
                 print(f"  Throughput:  {result['throughput_tps']:.0f} TPS")
 
         print(f"\n{'='*60}")
@@ -433,9 +454,9 @@ class VectorSearchBenchmark:
 
 async def main():
     """Run all benchmarks."""
-    print("="*60)
+    print("=" * 60)
     print("🚀 Vector Search Benchmark Suite")
-    print("="*60)
+    print("=" * 60)
     print(f"\nTimestamp: {datetime.now().isoformat()}")
 
     # Build connection string
@@ -462,14 +483,16 @@ async def main():
         benchmark.print_summary()
 
         # Save results
-        output_path = Path(__file__).parent.parent.parent / 'reports' / 'benchmark_results.json'
+        output_path = Path(__file__).parent.parent.parent / "reports" / "benchmark_results.json"
         benchmark.save_results(str(output_path))
 
         print("\n✅ All benchmarks completed successfully")
 
     except Exception as e:
         print(f"\n❌ Benchmark failed: {e}")
+        # Standard library imports
         import traceback
+
         traceback.print_exc()
         return 1
 

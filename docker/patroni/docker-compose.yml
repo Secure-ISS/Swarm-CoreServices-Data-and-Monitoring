@@ -1,0 +1,241 @@
+version: '3.9'
+
+services:
+  # etcd cluster for distributed consensus (3 nodes for quorum)
+  etcd-1:
+    image: quay.io/coreos/etcd:v3.5.11
+    container_name: etcd-1
+    hostname: etcd-1
+    command:
+      - etcd
+      - --name=etcd-1
+      - --initial-advertise-peer-urls=http://etcd-1:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --advertise-client-urls=http://etcd-1:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --initial-cluster=etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=patroni-cluster
+      - --enable-v2=true
+    networks:
+      - patroni-net
+    volumes:
+      - etcd-1-data:/etcd-data
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  etcd-2:
+    image: quay.io/coreos/etcd:v3.5.11
+    container_name: etcd-2
+    hostname: etcd-2
+    command:
+      - etcd
+      - --name=etcd-2
+      - --initial-advertise-peer-urls=http://etcd-2:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --advertise-client-urls=http://etcd-2:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --initial-cluster=etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=patroni-cluster
+      - --enable-v2=true
+    networks:
+      - patroni-net
+    volumes:
+      - etcd-2-data:/etcd-data
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  etcd-3:
+    image: quay.io/coreos/etcd:v3.5.11
+    container_name: etcd-3
+    hostname: etcd-3
+    command:
+      - etcd
+      - --name=etcd-3
+      - --initial-advertise-peer-urls=http://etcd-3:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --advertise-client-urls=http://etcd-3:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --initial-cluster=etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=patroni-cluster
+      - --enable-v2=true
+    networks:
+      - patroni-net
+    volumes:
+      - etcd-3-data:/etcd-data
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # PostgreSQL + Patroni nodes (3 nodes for HA)
+  patroni-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: patroni-1
+    hostname: patroni-1
+    environment:
+      - PATRONI_NAME=patroni-1
+      - PATRONI_SCOPE=${PATRONI_SCOPE:-patroni-cluster}
+      - PATRONI_RESTAPI_LISTEN=0.0.0.0:8008
+      - PATRONI_RESTAPI_CONNECT_ADDRESS=patroni-1:8008
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni-1:5432
+      - PATRONI_POSTGRESQL_DATA_DIR=/var/lib/postgresql/data
+      - PATRONI_ETCD3_HOSTS=etcd-1:2379,etcd-2:2379,etcd-3:2379
+      - PATRONI_SUPERUSER_USERNAME=${POSTGRES_USER:-postgres}
+      - PATRONI_SUPERUSER_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - PATRONI_REPLICATION_USERNAME=${REPLICATION_USER:-replicator}
+      - PATRONI_REPLICATION_PASSWORD=${REPLICATION_PASSWORD:-replicator_pass}
+    networks:
+      - patroni-net
+    volumes:
+      - patroni-1-data:/var/lib/postgresql/data
+      - ./patroni.yml:/etc/patroni/patroni.yml:ro
+    ports:
+      - "5435:5432"
+      - "8008:8008"
+    depends_on:
+      - etcd-1
+      - etcd-2
+      - etcd-3
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  patroni-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: patroni-2
+    hostname: patroni-2
+    environment:
+      - PATRONI_NAME=patroni-2
+      - PATRONI_SCOPE=${PATRONI_SCOPE:-patroni-cluster}
+      - PATRONI_RESTAPI_LISTEN=0.0.0.0:8008
+      - PATRONI_RESTAPI_CONNECT_ADDRESS=patroni-2:8008
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni-2:5432
+      - PATRONI_POSTGRESQL_DATA_DIR=/var/lib/postgresql/data
+      - PATRONI_ETCD3_HOSTS=etcd-1:2379,etcd-2:2379,etcd-3:2379
+      - PATRONI_SUPERUSER_USERNAME=${POSTGRES_USER:-postgres}
+      - PATRONI_SUPERUSER_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - PATRONI_REPLICATION_USERNAME=${REPLICATION_USER:-replicator}
+      - PATRONI_REPLICATION_PASSWORD=${REPLICATION_PASSWORD:-replicator_pass}
+    networks:
+      - patroni-net
+    volumes:
+      - patroni-2-data:/var/lib/postgresql/data
+      - ./patroni.yml:/etc/patroni/patroni.yml:ro
+    ports:
+      - "5433:5432"
+      - "8009:8008"
+    depends_on:
+      - etcd-1
+      - etcd-2
+      - etcd-3
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  patroni-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: patroni-3
+    hostname: patroni-3
+    environment:
+      - PATRONI_NAME=patroni-3
+      - PATRONI_SCOPE=${PATRONI_SCOPE:-patroni-cluster}
+      - PATRONI_RESTAPI_LISTEN=0.0.0.0:8008
+      - PATRONI_RESTAPI_CONNECT_ADDRESS=patroni-3:8008
+      - PATRONI_POSTGRESQL_LISTEN=0.0.0.0:5432
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni-3:5432
+      - PATRONI_POSTGRESQL_DATA_DIR=/var/lib/postgresql/data
+      - PATRONI_ETCD3_HOSTS=etcd-1:2379,etcd-2:2379,etcd-3:2379
+      - PATRONI_SUPERUSER_USERNAME=${POSTGRES_USER:-postgres}
+      - PATRONI_SUPERUSER_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - PATRONI_REPLICATION_USERNAME=${REPLICATION_USER:-replicator}
+      - PATRONI_REPLICATION_PASSWORD=${REPLICATION_PASSWORD:-replicator_pass}
+    networks:
+      - patroni-net
+    volumes:
+      - patroni-3-data:/var/lib/postgresql/data
+      - ./patroni.yml:/etc/patroni/patroni.yml:ro
+    ports:
+      - "5434:5432"
+      - "8010:8008"
+    depends_on:
+      - etcd-1
+      - etcd-2
+      - etcd-3
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # HAProxy for connection routing (reads/writes to correct nodes)
+  haproxy:
+    image: haproxy:2.9-alpine
+    container_name: haproxy
+    hostname: haproxy
+    networks:
+      - patroni-net
+    ports:
+      - "5000:5000"  # Primary (writes)
+      - "5001:5001"  # Replicas (reads)
+      - "7000:7000"  # Stats page
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - patroni-1
+      - patroni-2
+      - patroni-3
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  patroni-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  etcd-1-data:
+    driver: local
+  etcd-2-data:
+    driver: local
+  etcd-3-data:
+    driver: local
+  patroni-1-data:
+    driver: local
+  patroni-2-data:
+    driver: local
+  patroni-3-data:
+    driver: local

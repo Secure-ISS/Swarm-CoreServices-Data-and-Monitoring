@@ -5,20 +5,22 @@ This example shows how to use the DistributedDatabasePool for various
 common database operations with automatic routing and failover.
 """
 
+# Standard library imports
 import os
 import sys
 import time
 from typing import List
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Local imports
 from src.db.distributed_pool import (
-    DistributedDatabasePool,
     DatabaseNode,
+    DistributedDatabasePool,
     NodeRole,
     QueryType,
-    create_pool_from_env
+    create_pool_from_env,
 )
 
 
@@ -27,35 +29,37 @@ def example_1_basic_setup():
     print("\n=== Example 1: Basic Setup ===\n")
 
     coordinator = DatabaseNode(
-        host='localhost',
+        host="localhost",
         port=5432,
-        database='distributed_postgres_cluster',
-        user='dpg_cluster',
-        password='dpg_cluster_2026',
-        role=NodeRole.COORDINATOR
+        database="distributed_postgres_cluster",
+        user="dpg_cluster",
+        password=os.getenv("COORDINATOR_PASSWORD", "EXAMPLE_ONLY_USE_ENV_VAR"),
+        role=NodeRole.COORDINATOR,
     )
 
     pool = DistributedDatabasePool(coordinator_node=coordinator)
 
     # Write query
     with pool.cursor(QueryType.WRITE) as cur:
-        cur.execute("""
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS example_users (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(100),
                 email VARCHAR(100),
                 created_at TIMESTAMP DEFAULT NOW()
             )
-        """)
+        """
+        )
         print("✓ Created example_users table")
 
     # Insert data
     with pool.cursor(QueryType.WRITE) as cur:
         cur.execute(
             "INSERT INTO example_users (name, email) VALUES (%s, %s) RETURNING id",
-            ("Alice Johnson", "alice@example.com")
+            ("Alice Johnson", "alice@example.com"),
         )
-        user_id = cur.fetchone()['id']
+        user_id = cur.fetchone()["id"]
         print(f"✓ Inserted user with id={user_id}")
 
     # Read data
@@ -76,36 +80,33 @@ def example_2_read_write_splitting():
     print("\n=== Example 2: Read/Write Splitting ===\n")
 
     coordinator = DatabaseNode(
-        host='localhost',
+        host="localhost",
         port=5432,
-        database='distributed_postgres_cluster',
-        user='dpg_cluster',
-        password='dpg_cluster_2026',
-        role=NodeRole.COORDINATOR
+        database="distributed_postgres_cluster",
+        user="dpg_cluster",
+        password=os.getenv("COORDINATOR_PASSWORD", "EXAMPLE_ONLY_USE_ENV_VAR"),
+        role=NodeRole.COORDINATOR,
     )
 
     # In production, these would be different servers
     # For demo, we use same server but mark as replica
     replica_1 = DatabaseNode(
-        host='localhost',
+        host="localhost",
         port=5432,
-        database='distributed_postgres_cluster',
-        user='dpg_cluster',
-        password='dpg_cluster_2026',
-        role=NodeRole.REPLICA
+        database="distributed_postgres_cluster",
+        user="dpg_cluster",
+        password=os.getenv("COORDINATOR_PASSWORD", "EXAMPLE_ONLY_USE_ENV_VAR"),
+        role=NodeRole.REPLICA,
     )
 
-    pool = DistributedDatabasePool(
-        coordinator_node=coordinator,
-        replica_nodes=[replica_1]
-    )
+    pool = DistributedDatabasePool(coordinator_node=coordinator, replica_nodes=[replica_1])
 
     # Write goes to coordinator
     print("Writing to coordinator...")
     with pool.cursor(QueryType.WRITE) as cur:
         cur.execute(
             "INSERT INTO example_users (name, email) VALUES (%s, %s)",
-            ("Bob Smith", "bob@example.com")
+            ("Bob Smith", "bob@example.com"),
         )
     print("✓ Write completed")
 
@@ -132,51 +133,50 @@ def example_3_shard_aware_routing():
     print("\n=== Example 3: Shard-Aware Routing ===\n")
 
     coordinator = DatabaseNode(
-        host='localhost',
+        host="localhost",
         port=5432,
-        database='distributed_postgres_cluster',
-        user='dpg_cluster',
-        password='dpg_cluster_2026',
-        role=NodeRole.COORDINATOR
+        database="distributed_postgres_cluster",
+        user="dpg_cluster",
+        password=os.getenv("COORDINATOR_PASSWORD", "EXAMPLE_ONLY_USE_ENV_VAR"),
+        role=NodeRole.COORDINATOR,
     )
 
     # In production, these would be separate worker nodes
     # For demo purposes, we simulate with same database
     worker_0 = DatabaseNode(
-        host='localhost',
+        host="localhost",
         port=5432,
-        database='distributed_postgres_cluster',
-        user='dpg_cluster',
-        password='dpg_cluster_2026',
+        database="distributed_postgres_cluster",
+        user="dpg_cluster",
+        password=os.getenv("COORDINATOR_PASSWORD", "EXAMPLE_ONLY_USE_ENV_VAR"),
         role=NodeRole.WORKER,
-        shard_id=0
+        shard_id=0,
     )
 
     worker_1 = DatabaseNode(
-        host='localhost',
+        host="localhost",
         port=5432,
-        database='distributed_postgres_cluster',
-        user='dpg_cluster',
-        password='dpg_cluster_2026',
+        database="distributed_postgres_cluster",
+        user="dpg_cluster",
+        password=os.getenv("COORDINATOR_PASSWORD", "EXAMPLE_ONLY_USE_ENV_VAR"),
         role=NodeRole.WORKER,
-        shard_id=1
+        shard_id=1,
     )
 
-    pool = DistributedDatabasePool(
-        coordinator_node=coordinator,
-        worker_nodes=[worker_0, worker_1]
-    )
+    pool = DistributedDatabasePool(coordinator_node=coordinator, worker_nodes=[worker_0, worker_1])
 
     # Create sharded table
     with pool.cursor(QueryType.DDL) as cur:
-        cur.execute("""
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS sharded_orders (
                 order_id BIGINT PRIMARY KEY,
                 user_id BIGINT,
                 amount DECIMAL(10,2),
                 created_at TIMESTAMP DEFAULT NOW()
             )
-        """)
+        """
+        )
         print("✓ Created sharded_orders table")
 
     # Insert with shard keys
@@ -187,17 +187,14 @@ def example_3_shard_aware_routing():
         with pool.cursor(QueryType.WRITE, shard_key=user_id) as cur:
             cur.execute(
                 "INSERT INTO sharded_orders (order_id, user_id, amount) VALUES (%s, %s, %s)",
-                (user_id * 100, user_id, 99.99)
+                (user_id * 100, user_id, 99.99),
             )
         print(f"✓ Inserted order for user {user_id} (routed to shard)")
 
     # Query with shard key
     target_user = 1003
     with pool.cursor(QueryType.READ, shard_key=target_user) as cur:
-        cur.execute(
-            "SELECT * FROM sharded_orders WHERE user_id = %s",
-            (target_user,)
-        )
+        cur.execute("SELECT * FROM sharded_orders WHERE user_id = %s", (target_user,))
         orders = cur.fetchall()
         print(f"\n✓ Retrieved {len(orders)} orders for user {target_user}")
 
@@ -209,47 +206,46 @@ def example_4_distributed_transaction():
     print("\n=== Example 4: Distributed Transaction (2PC) ===\n")
 
     coordinator = DatabaseNode(
-        host='localhost',
+        host="localhost",
         port=5432,
-        database='distributed_postgres_cluster',
-        user='dpg_cluster',
-        password='dpg_cluster_2026',
-        role=NodeRole.COORDINATOR
+        database="distributed_postgres_cluster",
+        user="dpg_cluster",
+        password=os.getenv("COORDINATOR_PASSWORD", "EXAMPLE_ONLY_USE_ENV_VAR"),
+        role=NodeRole.COORDINATOR,
     )
 
     worker_0 = DatabaseNode(
-        host='localhost',
+        host="localhost",
         port=5432,
-        database='distributed_postgres_cluster',
-        user='dpg_cluster',
-        password='dpg_cluster_2026',
+        database="distributed_postgres_cluster",
+        user="dpg_cluster",
+        password=os.getenv("COORDINATOR_PASSWORD", "EXAMPLE_ONLY_USE_ENV_VAR"),
         role=NodeRole.WORKER,
-        shard_id=0
+        shard_id=0,
     )
 
     worker_1 = DatabaseNode(
-        host='localhost',
+        host="localhost",
         port=5432,
-        database='distributed_postgres_cluster',
-        user='dpg_cluster',
-        password='dpg_cluster_2026',
+        database="distributed_postgres_cluster",
+        user="dpg_cluster",
+        password=os.getenv("COORDINATOR_PASSWORD", "EXAMPLE_ONLY_USE_ENV_VAR"),
         role=NodeRole.WORKER,
-        shard_id=1
+        shard_id=1,
     )
 
-    pool = DistributedDatabasePool(
-        coordinator_node=coordinator,
-        worker_nodes=[worker_0, worker_1]
-    )
+    pool = DistributedDatabasePool(coordinator_node=coordinator, worker_nodes=[worker_0, worker_1])
 
     # Create wallet table
     with pool.cursor(QueryType.DDL) as cur:
-        cur.execute("""
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS user_wallets (
                 user_id BIGINT PRIMARY KEY,
                 balance DECIMAL(10,2) DEFAULT 0
             )
-        """)
+        """
+        )
 
     # Initialize balances
     for user_id in [2001, 2002]:
@@ -257,7 +253,7 @@ def example_4_distributed_transaction():
             cur.execute(
                 "INSERT INTO user_wallets (user_id, balance) VALUES (%s, %s) "
                 "ON CONFLICT (user_id) DO UPDATE SET balance = EXCLUDED.balance",
-                (user_id, 1000.00)
+                (user_id, 1000.00),
             )
 
     print("✓ Initialized wallets: user 2001 and 2002 each have $1000")
@@ -272,7 +268,7 @@ def example_4_distributed_transaction():
                 if shard_id == pool._get_shard_for_key(2001):
                     cur.execute(
                         "UPDATE user_wallets SET balance = balance - %s WHERE user_id = %s",
-                        (100.00, 2001)
+                        (100.00, 2001),
                     )
                     print(f"  ✓ Deducted $100 from user 2001 (shard {shard_id})")
 
@@ -281,7 +277,7 @@ def example_4_distributed_transaction():
                 if shard_id == pool._get_shard_for_key(2002):
                     cur.execute(
                         "UPDATE user_wallets SET balance = balance + %s WHERE user_id = %s",
-                        (100.00, 2002)
+                        (100.00, 2002),
                     )
                     print(f"  ✓ Added $100 to user 2002 (shard {shard_id})")
 
@@ -320,20 +316,20 @@ def example_5_health_monitoring():
     print(f"\nCoordinator: {health['coordinator']['host']}:{health['coordinator']['port']}")
     print(f"  Status: {'✓ Healthy' if health['coordinator']['healthy'] else '✗ Unhealthy'}")
 
-    if health['workers']:
+    if health["workers"]:
         print("\nWorkers:")
-        for worker in health['workers']:
-            status = '✓ Healthy' if worker['healthy'] else '✗ Unhealthy'
+        for worker in health["workers"]:
+            status = "✓ Healthy" if worker["healthy"] else "✗ Unhealthy"
             print(f"  Shard {worker['shard_id']}: {worker['host']}:{worker['port']} - {status}")
 
-    if health['replicas']:
+    if health["replicas"]:
         print("\nReplicas:")
-        for replica in health['replicas']:
-            status = '✓ Healthy' if replica['healthy'] else '✗ Unhealthy'
+        for replica in health["replicas"]:
+            status = "✓ Healthy" if replica["healthy"] else "✗ Unhealthy"
             print(f"  {replica['host']}:{replica['port']} - {status}")
 
     # Get statistics
-    stats = health['statistics']
+    stats = health["statistics"]
     print("\nStatistics:")
     print(f"  Total queries: {stats['total']}")
     print(f"  Read queries: {stats['reads']}")
@@ -348,30 +344,24 @@ def example_6_retry_and_failover():
     """Example 6: Automatic retry and failover."""
     print("\n=== Example 6: Retry and Failover ===\n")
 
+    # Local imports
     from src.db.distributed_pool import RetryConfig
 
     coordinator = DatabaseNode(
-        host='localhost',
+        host="localhost",
         port=5432,
-        database='distributed_postgres_cluster',
-        user='dpg_cluster',
-        password='dpg_cluster_2026',
-        role=NodeRole.COORDINATOR
+        database="distributed_postgres_cluster",
+        user="dpg_cluster",
+        password=os.getenv("COORDINATOR_PASSWORD", "EXAMPLE_ONLY_USE_ENV_VAR"),
+        role=NodeRole.COORDINATOR,
     )
 
     # Configure aggressive retry
     retry_config = RetryConfig(
-        max_retries=5,
-        initial_backoff=0.1,
-        max_backoff=2.0,
-        backoff_multiplier=2.0,
-        jitter=True
+        max_retries=5, initial_backoff=0.1, max_backoff=2.0, backoff_multiplier=2.0, jitter=True
     )
 
-    pool = DistributedDatabasePool(
-        coordinator_node=coordinator,
-        retry_config=retry_config
-    )
+    pool = DistributedDatabasePool(coordinator_node=coordinator, retry_config=retry_config)
 
     print("Configured pool with aggressive retry (max 5 retries)")
 
@@ -389,19 +379,16 @@ def example_6_retry_and_failover():
     print("\nSimulating connection retry (this will fail after retries)...")
 
     bad_node = DatabaseNode(
-        host='localhost',
+        host="localhost",
         port=9999,  # Invalid port
-        database='distributed_postgres_cluster',
-        user='dpg_cluster',
-        password='dpg_cluster_2026',
-        role=NodeRole.COORDINATOR
+        database="distributed_postgres_cluster",
+        user="dpg_cluster",
+        password=os.getenv("COORDINATOR_PASSWORD", "EXAMPLE_ONLY_USE_ENV_VAR"),
+        role=NodeRole.COORDINATOR,
     )
 
     try:
-        bad_pool = DistributedDatabasePool(
-            coordinator_node=bad_node,
-            retry_config=retry_config
-        )
+        bad_pool = DistributedDatabasePool(coordinator_node=bad_node, retry_config=retry_config)
     except Exception as e:
         print(f"✓ Failed as expected after retries: {type(e).__name__}")
 
@@ -416,12 +403,15 @@ def example_7_environment_config():
     # Show current environment variables
     print("Environment variables:")
     env_vars = [
-        'COORDINATOR_HOST', 'COORDINATOR_PORT', 'COORDINATOR_DB',
-        'WORKER_HOSTS', 'REPLICA_HOSTS'
+        "COORDINATOR_HOST",
+        "COORDINATOR_PORT",
+        "COORDINATOR_DB",
+        "WORKER_HOSTS",
+        "REPLICA_HOSTS",
     ]
 
     for var in env_vars:
-        value = os.getenv(var, '(not set)')
+        value = os.getenv(var, "(not set)")
         print(f"  {var}={value}")
 
     print("\nCreating pool from environment...")
@@ -441,13 +431,15 @@ def example_7_environment_config():
     except Exception as e:
         print(f"✗ Failed to create pool: {e}")
         print("\nSet environment variables in .env file:")
-        print("""
+        print(
+            """
 COORDINATOR_HOST=localhost
 COORDINATOR_PORT=5432
 COORDINATOR_DB=distributed_postgres_cluster
 COORDINATOR_USER=dpg_cluster
-COORDINATOR_PASSWORD=dpg_cluster_2026
-        """)
+COORDINATOR_PASSWORD=your_secure_password_here
+        """
+        )
 
 
 def main():
@@ -480,7 +472,9 @@ def main():
             sys.exit(0)
         except Exception as e:
             print(f"\n✗ Example '{name}' failed with error: {e}")
+            # Standard library imports
             import traceback
+
             traceback.print_exc()
 
         time.sleep(1)  # Pause between examples

@@ -6,26 +6,29 @@ credentials and insecure credential management.
 Addresses CVE-3: Hardcoded Credentials
 """
 
-import os
-import logging
+# Standard library imports
 import json
+import logging
+import os
 import secrets
-from typing import Dict, Optional, Any
-from pathlib import Path
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class CredentialError(Exception):
     """Raised when credential operation fails."""
+
     pass
 
 
 @dataclass
 class Credential:
     """Represents a secure credential."""
+
     key: str
     value: str
     created_at: datetime
@@ -154,7 +157,7 @@ class SecureCredentialStore:
         key: str,
         value: str,
         expires_in_days: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Cache a credential temporarily.
 
@@ -176,7 +179,7 @@ class SecureCredentialStore:
             value=value,
             created_at=datetime.utcnow(),
             expires_at=expires_at,
-            metadata=metadata
+            metadata=metadata,
         )
 
         self._cache[key] = cred
@@ -214,11 +217,11 @@ class SecureCredentialStore:
             CredentialError: If required parameters not found
         """
         return {
-            'host': self.get('RUVECTOR_HOST', 'localhost'),
-            'port': int(self.get('RUVECTOR_PORT', '5432')),
-            'database': self.get_required('RUVECTOR_DB'),
-            'user': self.get_required('RUVECTOR_USER'),
-            'password': self.get_required('RUVECTOR_PASSWORD'),
+            "host": self.get("RUVECTOR_HOST", "localhost"),
+            "port": int(self.get("RUVECTOR_PORT", "5432")),
+            "database": self.get_required("RUVECTOR_DB"),
+            "user": self.get_required("RUVECTOR_USER"),
+            "password": self.get_required("RUVECTOR_PASSWORD"),
         }
 
 
@@ -256,15 +259,17 @@ class CredentialManager:
 
         if complexity == "high":
             # Mix of alphanumeric + special characters
-            alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+"
-            password = ''.join(secrets.choice(alphabet) for _ in range(length))
+            alphabet = (
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+"
+            )
+            password = "".join(secrets.choice(alphabet) for _ in range(length))
         elif complexity == "medium":
             # Alphanumeric only
             password = secrets.token_urlsafe(length)[:length]
         else:
             # Simple alphanumeric
             alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-            password = ''.join(secrets.choice(alphabet) for _ in range(length))
+            password = "".join(secrets.choice(alphabet) for _ in range(length))
 
         return password
 
@@ -275,19 +280,19 @@ class CredentialManager:
             Dict with credential status information
         """
         status = {
-            'total_cached': len(self.store._cache),
-            'expired': [],
-            'needs_rotation': [],
-            'healthy': [],
+            "total_cached": len(self.store._cache),
+            "expired": [],
+            "needs_rotation": [],
+            "healthy": [],
         }
 
         for key, cred in self.store._cache.items():
             if cred.is_expired():
-                status['expired'].append(key)
+                status["expired"].append(key)
             elif cred.needs_rotation():
-                status['needs_rotation'].append(key)
+                status["needs_rotation"].append(key)
             else:
-                status['healthy'].append(key)
+                status["healthy"].append(key)
 
         return status
 

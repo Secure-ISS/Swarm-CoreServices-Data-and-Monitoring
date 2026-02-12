@@ -1,0 +1,252 @@
+# PostgreSQL Configuration with SSL/TLS Support
+# This configuration file enables SSL/TLS encryption for all connections
+#
+# Usage:
+# 1. Copy this file to your PostgreSQL configuration directory
+# 2. Update certificate paths below
+# 3. Restart PostgreSQL: docker restart ruvector-db
+#
+# For Docker: Mount this file and use:
+# docker run ... -v $(pwd)/docker/postgresql.conf.ssl:/etc/postgresql/postgresql.conf \
+#   -c config_file=/etc/postgresql/postgresql.conf
+
+# ===============================
+# SSL/TLS Configuration
+# ===============================
+
+# Enable SSL/TLS
+ssl = on
+
+# Certificate files (update paths to match your setup)
+ssl_cert_file = '/etc/postgresql/certs/server.crt'
+ssl_key_file = '/etc/postgresql/certs/server.key'
+ssl_ca_file = '/etc/postgresql/certs/ca.crt'
+
+# Certificate Revocation List (optional)
+# ssl_crl_file = '/etc/postgresql/certs/server.crl'
+
+# SSL Cipher Configuration
+# Use only strong, modern cipher suites
+# Recommended: ECDHE for forward secrecy, AES-GCM for authenticated encryption
+ssl_ciphers = 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256'
+
+# Prefer server's cipher suite order
+ssl_prefer_server_ciphers = on
+
+# Minimum TLS version (TLSv1.2 or higher recommended)
+# Options: TLSv1, TLSv1.1, TLSv1.2, TLSv1.3
+ssl_min_protocol_version = 'TLSv1.2'
+
+# Maximum TLS version (leave unset for latest)
+# ssl_max_protocol_version = 'TLSv1.3'
+
+# Diffie-Hellman parameters for additional security (optional)
+# ssl_dh_params_file = '/etc/postgresql/certs/dhparams.pem'
+
+# ECDH curve for Elliptic Curve Diffie-Hellman (optional)
+# ssl_ecdh_curve = 'prime256v1'
+
+# ===============================
+# Connection Settings
+# ===============================
+
+# Listen on all network interfaces
+listen_addresses = '*'
+
+# Port
+port = 5432
+
+# Maximum connections
+max_connections = 100
+
+# Connection limits per user/database
+# superuser_reserved_connections = 3
+
+# ===============================
+# Authentication Settings
+# ===============================
+
+# Password encryption method (scram-sha-256 recommended)
+password_encryption = scram-sha-256
+
+# ===============================
+# Memory Settings
+# ===============================
+
+# Shared memory buffers (25% of RAM recommended)
+shared_buffers = 256MB
+
+# Effective cache size (50-75% of RAM)
+effective_cache_size = 1GB
+
+# Maintenance work memory
+maintenance_work_mem = 64MB
+
+# Work memory per query operation
+work_mem = 4MB
+
+# ===============================
+# Write-Ahead Log (WAL) Settings
+# ===============================
+
+# WAL level (replica for replication, minimal for single node)
+wal_level = replica
+
+# Archive mode (for backups)
+archive_mode = off
+
+# WAL buffers
+wal_buffers = 16MB
+
+# Checkpoint settings
+checkpoint_timeout = 5min
+checkpoint_completion_target = 0.9
+
+# ===============================
+# Replication Settings
+# ===============================
+
+# Maximum WAL senders (for replicas)
+max_wal_senders = 3
+
+# Maximum replication slots
+max_replication_slots = 3
+
+# WAL keep segments
+wal_keep_size = 1GB
+
+# Hot standby (for read replicas)
+hot_standby = on
+
+# ===============================
+# Query Tuning
+# ===============================
+
+# Random page cost
+random_page_cost = 1.1  # For SSD storage
+
+# Effective I/O concurrency
+effective_io_concurrency = 200  # For SSD storage
+
+# Enable parallel query execution
+max_parallel_workers_per_gather = 2
+max_parallel_workers = 4
+
+# ===============================
+# Logging
+# ===============================
+
+# Log destination (stderr for Docker)
+logging_collector = off
+log_destination = 'stderr'
+
+# Log level (error, warning, info, debug1-5)
+log_min_messages = warning
+log_min_error_statement = error
+
+# Log connection attempts
+log_connections = on
+log_disconnections = on
+
+# Log slow queries (adjust as needed)
+log_min_duration_statement = 1000  # milliseconds
+
+# Log line prefix (timestamp, user, database, process ID)
+log_line_prefix = '%t [%u@%d] [%p] '
+
+# Log lock waits
+log_lock_waits = on
+
+# Log checkpoints
+log_checkpoints = on
+
+# Log temporary files
+log_temp_files = 0
+
+# ===============================
+# Statistics
+# ===============================
+
+# Track activity query size
+track_activity_query_size = 2048
+
+# Track I/O timing
+track_io_timing = on
+
+# Track functions
+track_functions = all
+
+# ===============================
+# Autovacuum
+# ===============================
+
+# Enable autovacuum
+autovacuum = on
+
+# Autovacuum parameters
+autovacuum_max_workers = 3
+autovacuum_naptime = 1min
+autovacuum_vacuum_threshold = 50
+autovacuum_analyze_threshold = 50
+autovacuum_vacuum_scale_factor = 0.1
+autovacuum_analyze_scale_factor = 0.05
+
+# ===============================
+# Client Connection Defaults
+# ===============================
+
+# Statement timeout (30 seconds default)
+statement_timeout = 30000  # milliseconds
+
+# Lock timeout (10 seconds)
+lock_timeout = 10000  # milliseconds
+
+# Idle in transaction timeout (5 minutes)
+idle_in_transaction_session_timeout = 300000  # milliseconds
+
+# ===============================
+# Error Handling
+# ===============================
+
+# Restart after crash
+restart_after_crash = on
+
+# ===============================
+# Extension Configuration
+# ===============================
+
+# Shared preload libraries (add your extensions here)
+# shared_preload_libraries = 'pg_stat_statements'
+
+# ===============================
+# Locale and Formatting
+# ===============================
+
+# Timezone
+timezone = 'UTC'
+
+# Default text search configuration
+default_text_search_config = 'pg_catalog.english'
+
+# ===============================
+# Lock Management
+# ===============================
+
+# Deadlock timeout
+deadlock_timeout = 1s
+
+# Max locks per transaction
+max_locks_per_transaction = 64
+
+# ===============================
+# Security Notes
+# ===============================
+
+# 1. Always use SSL/TLS in production (ssl = on)
+# 2. Use strong passwords with password_encryption = scram-sha-256
+# 3. Configure pg_hba.conf to require SSL connections
+# 4. Keep certificates up to date
+# 5. Monitor failed connection attempts
+# 6. Use client certificates for additional security (mutual TLS)
+# 7. Restrict network access with firewall rules
+# 8. Regular security audits and updates

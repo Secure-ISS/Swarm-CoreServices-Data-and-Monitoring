@@ -1,0 +1,213 @@
+# Patroni Configuration Template
+# High Availability PostgreSQL with Automatic Failover
+# Compatible with RuVector extension and dual-database setup
+
+scope: postgres-cluster
+namespace: /service/
+name: node-1  # Change to node-2, node-3 for other nodes
+
+# REST API configuration
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: node-1:8008  # Change to node-2:8008, node-3:8008
+
+# etcd configuration (Distributed Configuration Store)
+etcd3:
+  hosts:
+    - etcd-1:2379
+    - etcd-2:2379
+    - etcd-3:2379
+  protocol: http  # Use https with SSL certificates
+  # For SSL:
+  # protocol: https
+  # cacert: /etc/ssl/certs/etcd-ca.crt
+  # cert: /etc/ssl/certs/etcd-client.crt
+  # key: /etc/ssl/private/etcd-client.key
+
+# Bootstrap configuration (initial cluster setup)
+bootstrap:
+  # DCS configuration
+  dcs:
+    ttl: 30  # Leader lock TTL (seconds)
+    loop_wait: 10  # How often to check for leader lock (seconds)
+    retry_timeout: 10  # Retry timeout for DCS operations
+    maximum_lag_on_failover: 1048576  # 1MB - max lag to be eligible for failover
+
+    # PostgreSQL configuration
+    postgresql:
+      use_pg_rewind: true  # Enable pg_rewind for failed primary recovery
+      use_slots: true  # Use replication slots
+
+      parameters:
+        # Connection settings
+        max_connections: 200
+        superuser_reserved_connections: 5
+
+        # Memory settings (adjust based on available RAM)
+        shared_buffers: 4GB
+        effective_cache_size: 12GB
+        maintenance_work_mem: 1GB
+        work_mem: 32MB
+
+        # WAL settings
+        wal_level: replica
+        max_wal_senders: 10
+        max_replication_slots: 10
+        wal_keep_size: 1GB  # Keep 1GB of WAL
+
+        # Checkpointing
+        checkpoint_completion_target: 0.9
+        checkpoint_timeout: 15min
+        max_wal_size: 4GB
+        min_wal_size: 1GB
+
+        # Replication settings
+        hot_standby: on
+        hot_standby_feedback: on
+        wal_receiver_status_interval: 2s
+
+        # Logging
+        log_destination: stderr
+        logging_collector: on
+        log_directory: /var/log/postgresql
+        log_filename: postgresql-%Y-%m-%d_%H%M%S.log
+        log_rotation_age: 1d
+        log_rotation_size: 100MB
+        log_line_prefix: '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+        log_min_duration_statement: 1000  # Log slow queries (>1s)
+
+        # Performance tuning
+        random_page_cost: 1.1  # For SSD storage
+        effective_io_concurrency: 200  # For SSD storage
+
+        # Extension settings (RuVector)
+        shared_preload_libraries: 'pg_stat_statements'
+
+      # User management
+      pg_hba:
+        - local all postgres peer
+        - host all all 127.0.0.1/32 md5
+        - host replication replicator 10.0.1.0/24 md5
+        - hostssl all all 10.0.1.0/24 md5
+
+  # Initialize new cluster
+  initdb:
+    - encoding: UTF8
+    - locale: en_US.UTF-8
+    - data-checksums
+
+  # Post-initialization script
+  post_init: |
+    #!/bin/bash
+    set -e
+
+    # Create replication user
+    psql -U postgres -c "CREATE USER replicator WITH REPLICATION ENCRYPTED PASSWORD '${REPLICATION_PASSWORD}';"
+
+    # Create application databases
+    psql -U postgres -c "CREATE DATABASE distributed_postgres_cluster;"
+    psql -U postgres -c "CREATE DATABASE claude_flow_shared;"
+
+    # Install RuVector extension
+    psql -U postgres -d distributed_postgres_cluster -c "CREATE EXTENSION IF NOT EXISTS ruvector;"
+    psql -U postgres -d claude_flow_shared -c "CREATE EXTENSION IF NOT EXISTS ruvector;"
+
+    # Create application users
+    psql -U postgres -c "CREATE USER dpg_cluster WITH ENCRYPTED PASSWORD '${DPG_PASSWORD}';"
+    psql -U postgres -c "CREATE USER shared_user WITH ENCRYPTED PASSWORD '${SHARED_PASSWORD}';"
+    psql -U postgres -c "CREATE USER mcp_user WITH ENCRYPTED PASSWORD '${MCP_PASSWORD}';"
+
+    # Grant permissions
+    psql -U postgres -d distributed_postgres_cluster -c "GRANT ALL PRIVILEGES ON DATABASE distributed_postgres_cluster TO dpg_cluster;"
+    psql -U postgres -d claude_flow_shared -c "GRANT ALL PRIVILEGES ON DATABASE claude_flow_shared TO shared_user;"
+    psql -U postgres -d distributed_postgres_cluster -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO mcp_user;"
+    psql -U postgres -d claude_flow_shared -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO mcp_user;"
+
+    echo "Post-initialization complete"
+
+# PostgreSQL instance configuration
+postgresql:
+  # Data directory
+  data_dir: /var/lib/postgresql/data
+
+  # Binary locations
+  bin_dir: /usr/lib/postgresql/16/bin
+
+  # Connection settings
+  listen: 0.0.0.0:5432
+  connect_address: node-1:5432  # Change to node-2:5432, node-3:5432
+
+  # Authentication
+  authentication:
+    replication:
+      username: replicator
+      password: ${REPLICATION_PASSWORD}  # From Docker secret
+    superuser:
+      username: postgres
+      password: ${POSTGRES_PASSWORD}  # From Docker secret
+    rewind:
+      username: replicator
+      password: ${REPLICATION_PASSWORD}
+
+  # Replication settings
+  create_replica_methods:
+    - basebackup
+
+  basebackup:
+    max-rate: 100M
+    checkpoint: fast
+
+  # Custom PostgreSQL parameters (override bootstrap settings)
+  parameters:
+    # Synchronous replication configuration
+    # For coordinators (metadata nodes):
+    synchronous_commit: 'on'
+    synchronous_standby_names: 'ANY 1 (*)'  # Wait for any 1 standby
+
+    # For workers (data shards):
+    # synchronous_commit: 'local'  # Don't wait for standbys
+    # synchronous_standby_names: ''
+
+    # Archive configuration (optional - for WAL archiving)
+    # archive_mode: 'on'
+    # archive_command: 's3cmd put %p s3://backups/wal/%f'
+    # archive_timeout: 300
+
+  # Callbacks (scripts executed on events)
+  callbacks:
+    on_start: /etc/patroni/callbacks/on_start.sh
+    on_stop: /etc/patroni/callbacks/on_stop.sh
+    on_role_change: /etc/patroni/callbacks/on_role_change.sh
+
+  # pg_hba.conf (additional entries)
+  pg_hba:
+    - hostssl all all 0.0.0.0/0 md5
+
+  # Remove data directory on reinitialize
+  remove_data_directory_on_rewind_failure: true
+  remove_data_directory_on_diverged_timelines: true
+
+# Watchdog configuration (optional - for fencing)
+# watchdog:
+#   mode: required  # or 'automatic', 'off'
+#   device: /dev/watchdog
+#   safety_margin: 5
+
+# Tags for customization
+tags:
+  nofailover: false  # Set true to prevent node from becoming primary
+  noloadbalance: false  # Set true to exclude from load balancing
+  clonefrom: false  # Set true to prefer this node for pg_basebackup
+  nosync: false  # Set true to exclude from synchronous replication
+
+# Log configuration
+log:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
+  format: '%(asctime)s %(levelname)s: %(message)s'
+  dateformat: '%Y-%m-%d %H:%M:%S'
+
+  # Log to file
+  # file:
+  #   path: /var/log/patroni/patroni.log
+  #   max_bytes: 10485760  # 10MB
+  #   backup_count: 5

@@ -1,0 +1,1042 @@
+version: '3.9'
+
+# Production Distributed PostgreSQL Cluster
+# Complete High-Availability Stack with Patroni, etcd, HAProxy, Redis, and Monitoring
+#
+# Architecture:
+# - 3-node Patroni HA cluster (1 primary + 2 standby replicas)
+# - 3-node etcd cluster for consensus and coordination
+# - 2 HAProxy instances for load balancing
+# - 2 PgBouncer instances for connection pooling
+# - Redis cluster for caching
+# - Prometheus + Grafana monitoring stack
+# - Automated backups and health monitoring
+#
+# Deployment: docker stack deploy -c docker-compose.yml postgres-prod
+# Requires: Docker Swarm mode initialized
+
+networks:
+  # Coordinator network for etcd and Patroni coordinators
+  coordinator-net:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"
+    ipam:
+      config:
+        - subnet: 10.10.0.0/24
+    labels:
+      - "com.distributed-postgres.network=coordinator"
+
+  # Data network for PostgreSQL nodes
+  data-net:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"
+    ipam:
+      config:
+        - subnet: 10.10.1.0/24
+    labels:
+      - "com.distributed-postgres.network=data"
+
+  # Application network for client connections
+  app-net:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"
+    ipam:
+      config:
+        - subnet: 10.10.2.0/24
+    labels:
+      - "com.distributed-postgres.network=application"
+
+  # Monitoring network
+  monitoring-net:
+    driver: overlay
+    attachable: true
+    ipam:
+      config:
+        - subnet: 10.10.3.0/24
+    labels:
+      - "com.distributed-postgres.network=monitoring"
+
+volumes:
+  # etcd volumes
+  etcd-1-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/postgres-cluster/etcd-1
+  etcd-2-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/postgres-cluster/etcd-2
+  etcd-3-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/postgres-cluster/etcd-3
+
+  # Patroni PostgreSQL volumes
+  patroni-1-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/postgres-cluster/patroni-1
+  patroni-2-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/postgres-cluster/patroni-2
+  patroni-3-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/postgres-cluster/patroni-3
+
+  # Redis volumes
+  redis-data:
+    driver: local
+  redis-sentinel-data:
+    driver: local
+
+  # Backup storage
+  backup-storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/postgres-cluster/backups
+
+  # Monitoring volumes
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+  # HAProxy config
+  haproxy-config:
+    driver: local
+
+secrets:
+  postgres_password:
+    external: true
+  replication_password:
+    external: true
+  postgres_mcp_password:
+    external: true
+  redis_password:
+    external: true
+  grafana_admin_password:
+    external: true
+  postgres_ssl_cert:
+    external: true
+  postgres_ssl_key:
+    external: true
+  postgres_ssl_ca:
+    external: true
+
+configs:
+  patroni_config:
+    file: ../../config/patroni/patroni.yml
+  haproxy_config:
+    file: ../../config/haproxy/haproxy.cfg
+  pgbouncer_config:
+    file: ../../config/pgbouncer.ini
+  prometheus_config:
+    file: ../../config/monitoring/prometheus.yml
+  prometheus_alerts:
+    file: ../../scripts/performance/prometheus_alerts.yml
+
+services:
+  # ============================================================
+  # ETCD CLUSTER (Distributed Consensus Layer)
+  # ============================================================
+  etcd-1:
+    image: quay.io/coreos/etcd:v3.5.11
+    hostname: etcd-1
+    networks:
+      - coordinator-net
+    volumes:
+      - etcd-1-data:/etcd-data
+    environment:
+      ETCD_NAME: etcd-1
+      ETCD_DATA_DIR: /etcd-data
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-1:2379
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-1:2380
+      ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: postgres-cluster-prod-token
+      ETCD_HEARTBEAT_INTERVAL: 100
+      ETCD_ELECTION_TIMEOUT: 1000
+      ETCD_AUTO_COMPACTION_RETENTION: "1"
+      ETCD_QUOTA_BACKEND_BYTES: 8589934592  # 8GB
+      ETCD_MAX_REQUEST_BYTES: 10485760      # 10MB
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+          - node.labels.postgres.etcd == etcd-1
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+      labels:
+        - "com.distributed-postgres.role=etcd"
+        - "com.distributed-postgres.cluster=main"
+        - "com.distributed-postgres.etcd-id=1"
+    healthcheck:
+      test: ["CMD-SHELL", "etcdctl endpoint health --cluster"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  etcd-2:
+    image: quay.io/coreos/etcd:v3.5.11
+    hostname: etcd-2
+    networks:
+      - coordinator-net
+    volumes:
+      - etcd-2-data:/etcd-data
+    environment:
+      ETCD_NAME: etcd-2
+      ETCD_DATA_DIR: /etcd-data
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-2:2379
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-2:2380
+      ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: postgres-cluster-prod-token
+      ETCD_HEARTBEAT_INTERVAL: 100
+      ETCD_ELECTION_TIMEOUT: 1000
+      ETCD_AUTO_COMPACTION_RETENTION: "1"
+      ETCD_QUOTA_BACKEND_BYTES: 8589934592
+      ETCD_MAX_REQUEST_BYTES: 10485760
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+          - node.labels.postgres.etcd == etcd-2
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+      labels:
+        - "com.distributed-postgres.role=etcd"
+        - "com.distributed-postgres.cluster=main"
+        - "com.distributed-postgres.etcd-id=2"
+    healthcheck:
+      test: ["CMD-SHELL", "etcdctl endpoint health --cluster"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  etcd-3:
+    image: quay.io/coreos/etcd:v3.5.11
+    hostname: etcd-3
+    networks:
+      - coordinator-net
+    volumes:
+      - etcd-3-data:/etcd-data
+    environment:
+      ETCD_NAME: etcd-3
+      ETCD_DATA_DIR: /etcd-data
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-3:2379
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-3:2380
+      ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: postgres-cluster-prod-token
+      ETCD_HEARTBEAT_INTERVAL: 100
+      ETCD_ELECTION_TIMEOUT: 1000
+      ETCD_AUTO_COMPACTION_RETENTION: "1"
+      ETCD_QUOTA_BACKEND_BYTES: 8589934592
+      ETCD_MAX_REQUEST_BYTES: 10485760
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+          - node.labels.postgres.etcd == etcd-3
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+      labels:
+        - "com.distributed-postgres.role=etcd"
+        - "com.distributed-postgres.cluster=main"
+        - "com.distributed-postgres.etcd-id=3"
+    healthcheck:
+      test: ["CMD-SHELL", "etcdctl endpoint health --cluster"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================
+  # PATRONI HA CLUSTER (3-Node PostgreSQL Cluster)
+  # ============================================================
+  patroni-1:
+    image: ruvnet/ruvector-postgres:latest
+    hostname: patroni-1
+    networks:
+      - coordinator-net
+      - data-net
+    volumes:
+      - patroni-1-data:/var/lib/postgresql/data
+      - type: bind
+        source: ../../scripts/sql
+        target: /docker-entrypoint-initdb.d
+        read_only: true
+    secrets:
+      - postgres_password
+      - replication_password
+      - postgres_ssl_cert
+      - postgres_ssl_key
+      - postgres_ssl_ca
+    configs:
+      - source: patroni_config
+        target: /etc/patroni.yml
+    environment:
+      # Patroni configuration
+      PATRONI_NAME: patroni-1
+      PATRONI_SCOPE: postgres-cluster-main
+      PATRONI_ETCD3_HOSTS: etcd-1:2379,etcd-2:2379,etcd-3:2379
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: patroni-1:5432
+      PATRONI_RESTAPI_CONNECT_ADDRESS: patroni-1:8008
+      PATRONI_POSTGRESQL_DATA_DIR: /var/lib/postgresql/data/pgdata
+
+      # Authentication
+      PATRONI_SUPERUSER_USERNAME: postgres
+      PATRONI_SUPERUSER_PASSWORD_FILE: /run/secrets/postgres_password
+      PATRONI_REPLICATION_USERNAME: replicator
+      PATRONI_REPLICATION_PASSWORD_FILE: /run/secrets/replication_password
+
+      # PostgreSQL parameters
+      PATRONI_POSTGRESQL_PARAMETERS_MAX_CONNECTIONS: "500"
+      PATRONI_POSTGRESQL_PARAMETERS_SHARED_BUFFERS: 8GB
+      PATRONI_POSTGRESQL_PARAMETERS_EFFECTIVE_CACHE_SIZE: 24GB
+      PATRONI_POSTGRESQL_PARAMETERS_WORK_MEM: 128MB
+      PATRONI_POSTGRESQL_PARAMETERS_MAINTENANCE_WORK_MEM: 2GB
+      PATRONI_POSTGRESQL_PARAMETERS_WAL_LEVEL: replica
+      PATRONI_POSTGRESQL_PARAMETERS_MAX_WAL_SENDERS: 10
+      PATRONI_POSTGRESQL_PARAMETERS_MAX_REPLICATION_SLOTS: 10
+      PATRONI_POSTGRESQL_PARAMETERS_HOT_STANDBY: "on"
+      PATRONI_POSTGRESQL_PARAMETERS_WAL_LOG_HINTS: "on"
+      PATRONI_POSTGRESQL_PARAMETERS_SHARED_PRELOAD_LIBRARIES: ruvector,pg_stat_statements
+      PATRONI_POSTGRESQL_PARAMETERS_SYNCHRONOUS_COMMIT: "on"
+      PATRONI_POSTGRESQL_PARAMETERS_SYNCHRONOUS_STANDBY_NAMES: "*"
+
+      # SSL configuration
+      PATRONI_POSTGRESQL_PARAMETERS_SSL: "on"
+      PATRONI_POSTGRESQL_PARAMETERS_SSL_CERT_FILE: /run/secrets/postgres_ssl_cert
+      PATRONI_POSTGRESQL_PARAMETERS_SSL_KEY_FILE: /run/secrets/postgres_ssl_key
+      PATRONI_POSTGRESQL_PARAMETERS_SSL_CA_FILE: /run/secrets/postgres_ssl_ca
+
+      # Performance tuning
+      PATRONI_POSTGRESQL_PARAMETERS_RANDOM_PAGE_COST: 1.1
+      PATRONI_POSTGRESQL_PARAMETERS_EFFECTIVE_IO_CONCURRENCY: 200
+      PATRONI_POSTGRESQL_PARAMETERS_MAX_WORKER_PROCESSES: 8
+      PATRONI_POSTGRESQL_PARAMETERS_MAX_PARALLEL_WORKERS_PER_GATHER: 4
+      PATRONI_POSTGRESQL_PARAMETERS_MAX_PARALLEL_WORKERS: 8
+      PATRONI_POSTGRESQL_PARAMETERS_WAL_BUFFERS: 16MB
+      PATRONI_POSTGRESQL_PARAMETERS_MIN_WAL_SIZE: 2GB
+      PATRONI_POSTGRESQL_PARAMETERS_MAX_WAL_SIZE: 8GB
+      PATRONI_POSTGRESQL_PARAMETERS_CHECKPOINT_COMPLETION_TARGET: 0.9
+
+      # Logging
+      PATRONI_POSTGRESQL_PARAMETERS_LOG_DESTINATION: csvlog
+      PATRONI_POSTGRESQL_PARAMETERS_LOGGING_COLLECTOR: "on"
+      PATRONI_POSTGRESQL_PARAMETERS_LOG_DIRECTORY: /var/log/postgresql
+      PATRONI_POSTGRESQL_PARAMETERS_LOG_FILENAME: postgresql-%Y-%m-%d_%H%M%S.log
+      PATRONI_POSTGRESQL_PARAMETERS_LOG_ROTATION_AGE: 1d
+      PATRONI_POSTGRESQL_PARAMETERS_LOG_ROTATION_SIZE: 100MB
+      PATRONI_POSTGRESQL_PARAMETERS_LOG_MIN_DURATION_STATEMENT: 1000
+      PATRONI_POSTGRESQL_PARAMETERS_LOG_LINE_PREFIX: "%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h "
+
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.postgres.role == patroni
+          - node.labels.postgres.patroni-id == 1
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: '8'
+          memory: 32G
+        reservations:
+          cpus: '4'
+          memory: 16G
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 60s
+        failure_action: rollback
+        order: stop-first
+      labels:
+        - "com.distributed-postgres.role=patroni"
+        - "com.distributed-postgres.cluster=main"
+        - "com.distributed-postgres.patroni-id=1"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres && curl -f http://localhost:8008/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  patroni-2:
+    image: ruvnet/ruvector-postgres:latest
+    hostname: patroni-2
+    networks:
+      - coordinator-net
+      - data-net
+    volumes:
+      - patroni-2-data:/var/lib/postgresql/data
+      - type: bind
+        source: ../../scripts/sql
+        target: /docker-entrypoint-initdb.d
+        read_only: true
+    secrets:
+      - postgres_password
+      - replication_password
+      - postgres_ssl_cert
+      - postgres_ssl_key
+      - postgres_ssl_ca
+    configs:
+      - source: patroni_config
+        target: /etc/patroni.yml
+    environment:
+      PATRONI_NAME: patroni-2
+      PATRONI_SCOPE: postgres-cluster-main
+      PATRONI_ETCD3_HOSTS: etcd-1:2379,etcd-2:2379,etcd-3:2379
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: patroni-2:5432
+      PATRONI_RESTAPI_CONNECT_ADDRESS: patroni-2:8008
+      PATRONI_POSTGRESQL_DATA_DIR: /var/lib/postgresql/data/pgdata
+      PATRONI_SUPERUSER_USERNAME: postgres
+      PATRONI_SUPERUSER_PASSWORD_FILE: /run/secrets/postgres_password
+      PATRONI_REPLICATION_USERNAME: replicator
+      PATRONI_REPLICATION_PASSWORD_FILE: /run/secrets/replication_password
+      # Same PostgreSQL parameters as patroni-1
+      PATRONI_POSTGRESQL_PARAMETERS_MAX_CONNECTIONS: "500"
+      PATRONI_POSTGRESQL_PARAMETERS_SHARED_BUFFERS: 8GB
+      PATRONI_POSTGRESQL_PARAMETERS_EFFECTIVE_CACHE_SIZE: 24GB
+      PATRONI_POSTGRESQL_PARAMETERS_WORK_MEM: 128MB
+      PATRONI_POSTGRESQL_PARAMETERS_SHARED_PRELOAD_LIBRARIES: ruvector,pg_stat_statements
+      PATRONI_POSTGRESQL_PARAMETERS_SYNCHRONOUS_COMMIT: "on"
+      PATRONI_POSTGRESQL_PARAMETERS_SSL: "on"
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.postgres.role == patroni
+          - node.labels.postgres.patroni-id == 2
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: '8'
+          memory: 32G
+        reservations:
+          cpus: '4'
+          memory: 16G
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 60s
+        failure_action: rollback
+        order: stop-first
+      labels:
+        - "com.distributed-postgres.role=patroni"
+        - "com.distributed-postgres.cluster=main"
+        - "com.distributed-postgres.patroni-id=2"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres && curl -f http://localhost:8008/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  patroni-3:
+    image: ruvnet/ruvector-postgres:latest
+    hostname: patroni-3
+    networks:
+      - coordinator-net
+      - data-net
+    volumes:
+      - patroni-3-data:/var/lib/postgresql/data
+      - type: bind
+        source: ../../scripts/sql
+        target: /docker-entrypoint-initdb.d
+        read_only: true
+    secrets:
+      - postgres_password
+      - replication_password
+      - postgres_ssl_cert
+      - postgres_ssl_key
+      - postgres_ssl_ca
+    configs:
+      - source: patroni_config
+        target: /etc/patroni.yml
+    environment:
+      PATRONI_NAME: patroni-3
+      PATRONI_SCOPE: postgres-cluster-main
+      PATRONI_ETCD3_HOSTS: etcd-1:2379,etcd-2:2379,etcd-3:2379
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: patroni-3:5432
+      PATRONI_RESTAPI_CONNECT_ADDRESS: patroni-3:8008
+      PATRONI_POSTGRESQL_DATA_DIR: /var/lib/postgresql/data/pgdata
+      PATRONI_SUPERUSER_USERNAME: postgres
+      PATRONI_SUPERUSER_PASSWORD_FILE: /run/secrets/postgres_password
+      PATRONI_REPLICATION_USERNAME: replicator
+      PATRONI_REPLICATION_PASSWORD_FILE: /run/secrets/replication_password
+      PATRONI_POSTGRESQL_PARAMETERS_MAX_CONNECTIONS: "500"
+      PATRONI_POSTGRESQL_PARAMETERS_SHARED_BUFFERS: 8GB
+      PATRONI_POSTGRESQL_PARAMETERS_EFFECTIVE_CACHE_SIZE: 24GB
+      PATRONI_POSTGRESQL_PARAMETERS_WORK_MEM: 128MB
+      PATRONI_POSTGRESQL_PARAMETERS_SHARED_PRELOAD_LIBRARIES: ruvector,pg_stat_statements
+      PATRONI_POSTGRESQL_PARAMETERS_SYNCHRONOUS_COMMIT: "on"
+      PATRONI_POSTGRESQL_PARAMETERS_SSL: "on"
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.postgres.role == patroni
+          - node.labels.postgres.patroni-id == 3
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: '8'
+          memory: 32G
+        reservations:
+          cpus: '4'
+          memory: 16G
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 60s
+        failure_action: rollback
+        order: stop-first
+      labels:
+        - "com.distributed-postgres.role=patroni"
+        - "com.distributed-postgres.cluster=main"
+        - "com.distributed-postgres.patroni-id=3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres && curl -f http://localhost:8008/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  # ============================================================
+  # HAPROXY LOAD BALANCER (Active/Passive)
+  # ============================================================
+  haproxy:
+    image: haproxy:2.9-alpine
+    hostname: haproxy
+    networks:
+      - data-net
+      - app-net
+      - monitoring-net
+    ports:
+      - target: 5432
+        published: 5432
+        protocol: tcp
+        mode: ingress
+      - target: 5433
+        published: 5433
+        protocol: tcp
+        mode: ingress  # Read-only port
+      - target: 7000
+        published: 7000
+        protocol: tcp
+        mode: ingress  # Stats page
+    configs:
+      - source: haproxy_config
+        target: /usr/local/etc/haproxy/haproxy.cfg
+    deploy:
+      mode: replicated
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+      labels:
+        - "com.distributed-postgres.role=load-balancer"
+        - "com.distributed-postgres.cluster=main"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 5432"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ============================================================
+  # PGBOUNCER CONNECTION POOLER
+  # ============================================================
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    hostname: pgbouncer
+    networks:
+      - app-net
+      - data-net
+    ports:
+      - target: 6432
+        published: 6432
+        protocol: tcp
+        mode: ingress
+    secrets:
+      - postgres_password
+    configs:
+      - source: pgbouncer_config
+        target: /etc/pgbouncer/pgbouncer.ini
+    environment:
+      DATABASE_URL: "postgresql://postgres:$(cat /run/secrets/postgres_password)@haproxy:5432/distributed_postgres_cluster"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 5000
+      DEFAULT_POOL_SIZE: 50
+      MIN_POOL_SIZE: 20
+      RESERVE_POOL_SIZE: 10
+      SERVER_IDLE_TIMEOUT: 600
+      SERVER_LIFETIME: 3600
+      SERVER_CONNECT_TIMEOUT: 15
+      QUERY_TIMEOUT: 300
+      QUERY_WAIT_TIMEOUT: 120
+      MAX_DB_CONNECTIONS: 100
+      MAX_USER_CONNECTIONS: 100
+    deploy:
+      mode: replicated
+      replicas: 2
+      placement:
+        preferences:
+          - spread: node.id
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+      labels:
+        - "com.distributed-postgres.role=connection-pooler"
+        - "com.distributed-postgres.cluster=main"
+    healthcheck:
+      test: ["CMD-SHELL", "psql -U postgres -h localhost -p 6432 -d pgbouncer -c 'SHOW POOLS'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================
+  # REDIS CACHE CLUSTER
+  # ============================================================
+  redis-master:
+    image: redis:7-alpine
+    hostname: redis-master
+    networks:
+      - app-net
+    ports:
+      - target: 6379
+        published: 6379
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - redis-data:/data
+    secrets:
+      - redis_password
+    command: >
+      redis-server
+      --requirepass $(cat /run/secrets/redis_password)
+      --maxmemory 4gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --appendonly yes
+      --appendfsync everysec
+      --tcp-backlog 511
+      --timeout 300
+      --tcp-keepalive 60
+      --maxclients 10000
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.redis.role == master
+      resources:
+        limits:
+          cpus: '2'
+          memory: 6G
+        reservations:
+          cpus: '1'
+          memory: 4G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+      labels:
+        - "com.distributed-postgres.role=cache"
+        - "com.distributed-postgres.cluster=main"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--pass", "$$(cat /run/secrets/redis_password)", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # ============================================================
+  # PROMETHEUS MONITORING
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:latest
+    hostname: prometheus
+    networks:
+      - monitoring-net
+      - coordinator-net
+      - data-net
+    ports:
+      - target: 9090
+        published: 9090
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - prometheus-data:/prometheus
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+      - source: prometheus_alerts
+        target: /etc/prometheus/alerts.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=50GB'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+      labels:
+        - "com.distributed-postgres.role=monitoring"
+        - "com.distributed-postgres.cluster=main"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================
+  # GRAFANA DASHBOARDS
+  # ============================================================
+  grafana:
+    image: grafana/grafana:latest
+    hostname: grafana
+    networks:
+      - monitoring-net
+      - app-net
+    ports:
+      - target: 3000
+        published: 3001
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - type: bind
+        source: ../../config/monitoring/dashboards
+        target: /etc/grafana/provisioning/dashboards
+        read_only: true
+    secrets:
+      - grafana_admin_password
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD_FILE: /run/secrets/grafana_admin_password
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-piechart-panel,grafana-worldmap-panel
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/postgres-cluster-overview.json
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://grafana:3000
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+      labels:
+        - "com.distributed-postgres.role=monitoring"
+        - "com.distributed-postgres.cluster=main"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================
+  # BACKUP AGENT (Automated Backups)
+  # ============================================================
+  backup-agent:
+    image: ruvnet/ruvector-postgres:latest
+    hostname: backup-agent
+    networks:
+      - data-net
+    volumes:
+      - backup-storage:/backups
+      - type: bind
+        source: ../../scripts/backup
+        target: /scripts
+        read_only: true
+    secrets:
+      - postgres_password
+    environment:
+      POSTGRES_HOST: haproxy
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_DB: distributed_postgres_cluster
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      BACKUP_SCHEDULE: "0 2 * * *"  # Daily at 2 AM
+      BACKUP_RETENTION_DAYS: 30
+      BACKUP_PATH: /backups
+      BACKUP_COMPRESSION: zstd
+      BACKUP_ENCRYPTION: aes256
+    command: >
+      sh -c "apt-get update && apt-get install -y cron zstd &&
+             echo '$$BACKUP_SCHEDULE /scripts/backup-patroni.sh' | crontab - &&
+             cron -f"
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+        delay: 60s
+        max_attempts: 3
+        window: 300s
+      labels:
+        - "com.distributed-postgres.role=backup"
+        - "com.distributed-postgres.cluster=main"
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f crond || exit 1"]
+      interval: 300s
+      timeout: 10s
+      retries: 2
+      start_period: 60s
+
+  # ============================================================
+  # POSTGRES EXPORTER (Metrics Collection)
+  # ============================================================
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    hostname: postgres-exporter
+    networks:
+      - monitoring-net
+      - data-net
+    secrets:
+      - postgres_password
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:$(cat /run/secrets/postgres_password)@haproxy:5432/distributed_postgres_cluster?sslmode=require"
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "true"
+      PG_EXPORTER_EXCLUDE_DATABASES: template0,template1
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        preferences:
+          - spread: node.id
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 60s
+      labels:
+        - "com.distributed-postgres.role=monitoring"
+        - "com.distributed-postgres.cluster=main"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:9187/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+# ============================================================
+# DEPLOYMENT NOTES
+# ============================================================
+#
+# Prerequisites:
+# 1. Docker Swarm initialized: docker swarm init
+# 2. Node labels configured (see scripts/deployment/configure-nodes.sh)
+# 3. Secrets created (see scripts/deployment/create-secrets.sh)
+# 4. Storage directories created: /mnt/postgres-cluster/{etcd-*,patroni-*,backups}
+# 5. SSL certificates generated (see scripts/generate_ssl_certs.sh)
+#
+# Deployment:
+# 1. Deploy stack: docker stack deploy -c docker-compose.yml postgres-prod
+# 2. Verify deployment: docker stack ps postgres-prod
+# 3. Check services: docker service ls
+# 4. View logs: docker service logs postgres-prod_patroni-1
+#
+# Access Points:
+# - PostgreSQL (read-write): haproxy:5432 or pgbouncer:6432
+# - PostgreSQL (read-only): haproxy:5433
+# - HAProxy stats: http://manager:7000
+# - Prometheus: http://manager:9090
+# - Grafana: http://manager:3001
+# - Patroni API: http://patroni-N:8008
+#
+# Scaling:
+# - Scale workers: docker service scale postgres-prod_patroni=5
+# - Scale HAProxy: docker service scale postgres-prod_haproxy=3
+# - Scale PgBouncer: docker service scale postgres-prod_pgbouncer=4
+#
+# Monitoring:
+# - Cluster health: curl http://patroni-1:8008/cluster
+# - etcd health: curl http://etcd-1:2379/health
+# - Prometheus targets: http://manager:9090/targets
+#
+# Maintenance:
+# - Rolling update: docker service update --image new-image:tag postgres-prod_patroni-1
+# - Drain node: docker node update --availability drain node-1
+# - Manual failover: curl -X POST http://patroni-1:8008/failover

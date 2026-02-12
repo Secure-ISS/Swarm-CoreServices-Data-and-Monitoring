@@ -1,16 +1,19 @@
 """Tests for password hashing module (CVE-2 remediation)."""
 
+# Third-party imports
 import pytest
+
+# Local imports
 from src.domains.security.hashing import (
-    PasswordHasher,
+    ARGON2_AVAILABLE,
+    BCRYPT_AVAILABLE,
     HashAlgorithm,
+    PasswordHasher,
     PasswordHashingError,
     PasswordVerificationError,
+    generate_secure_password,
     hash_password,
     verify_password,
-    generate_secure_password,
-    BCRYPT_AVAILABLE,
-    ARGON2_AVAILABLE,
 )
 
 
@@ -27,7 +30,7 @@ class TestBcryptHashing:
 
         assert hashed is not None
         assert isinstance(hashed, str)
-        assert hashed.startswith('$2b$')  # bcrypt prefix
+        assert hashed.startswith("$2b$")  # bcrypt prefix
         assert len(hashed) == 60  # bcrypt hash length
 
     def test_verify_password_correct(self):
@@ -89,7 +92,7 @@ class TestArgon2Hashing:
 
         assert hashed is not None
         assert isinstance(hashed, str)
-        assert hashed.startswith('$argon2id$')
+        assert hashed.startswith("$argon2id$")
 
     def test_verify_password_correct(self):
         """Test verification of correct password."""
@@ -121,8 +124,9 @@ class TestArgon2Hashing:
 class TestConvenienceFunctions:
     """Test convenience functions."""
 
-    @pytest.mark.skipif(not (BCRYPT_AVAILABLE or ARGON2_AVAILABLE),
-                       reason="No hashing library installed")
+    @pytest.mark.skipif(
+        not (BCRYPT_AVAILABLE or ARGON2_AVAILABLE), reason="No hashing library installed"
+    )
     def test_hash_password_function(self):
         """Test hash_password convenience function."""
         password = "test_password_123"
@@ -133,8 +137,9 @@ class TestConvenienceFunctions:
         assert isinstance(hashed, str)
         assert verify_password(password, hashed) is True
 
-    @pytest.mark.skipif(not (BCRYPT_AVAILABLE or ARGON2_AVAILABLE),
-                       reason="No hashing library installed")
+    @pytest.mark.skipif(
+        not (BCRYPT_AVAILABLE or ARGON2_AVAILABLE), reason="No hashing library installed"
+    )
     def test_verify_password_function(self):
         """Test verify_password convenience function."""
         password = "test_password_123"
@@ -166,6 +171,7 @@ class TestSecurityProperties:
     @pytest.mark.skipif(not BCRYPT_AVAILABLE, reason="bcrypt not installed")
     def test_timing_attack_resistance(self):
         """Test that verification takes similar time for valid/invalid passwords."""
+        # Standard library imports
         import time
 
         hasher = PasswordHasher(algorithm=HashAlgorithm.BCRYPT)
@@ -197,9 +203,9 @@ class TestSecurityProperties:
         # Hash should not contain any substring of password
         assert password.lower() not in hashed.lower()
         for i in range(len(password) - 4):
-            substring = password[i:i+5]
+            substring = password[i : i + 5]
             assert substring.lower() not in hashed.lower()
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

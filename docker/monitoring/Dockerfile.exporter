@@ -1,0 +1,31 @@
+FROM python:3.11-slim
+
+LABEL maintainer="DPG Cluster Team"
+LABEL description="Custom application metrics exporter for RuVector and DPG Cluster"
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY exporter.py .
+
+# Expose metrics port
+EXPOSE 9999
+
+# Health check
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
+    CMD python -c "import requests; requests.get('http://localhost:9999/metrics')"
+
+# Run exporter
+CMD ["python", "exporter.py"]

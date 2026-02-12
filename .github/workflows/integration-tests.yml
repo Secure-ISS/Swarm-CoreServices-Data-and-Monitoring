@@ -1,0 +1,351 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Test suite to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - distributed_cluster
+          - citus_sharding
+          - ha_failover
+          - cache_coherence
+
+env:
+  PYTHON_VERSION: '3.12'
+  POSTGRES_VERSION: '16'
+
+jobs:
+  # ====================================
+  # Basic Integration Tests
+  # ====================================
+  test-basic-integration:
+    name: Basic Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: ruvnet/ruvector-postgres:latest
+        env:
+          POSTGRES_USER: dpg_cluster
+          POSTGRES_PASSWORD: dpg_cluster_2026
+          POSTGRES_DB: distributed_postgres_cluster
+          POSTGRES_SHARED_BUFFERS: 256MB
+          POSTGRES_MAX_CONNECTIONS: 100
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dpg_cluster"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-timeout pytest-xdist
+
+      - name: Wait for services
+        run: |
+          sleep 10
+
+      - name: Initialize database
+        env:
+          RUVECTOR_HOST: localhost
+          RUVECTOR_PORT: 5432
+          RUVECTOR_DB: distributed_postgres_cluster
+          RUVECTOR_USER: dpg_cluster
+          RUVECTOR_PASSWORD: dpg_cluster_2026
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: |
+          psql -h localhost -U dpg_cluster -d distributed_postgres_cluster -f scripts/sql/init-ruvector.sql
+        env:
+          PGPASSWORD: dpg_cluster_2026
+
+      - name: Run basic integration tests
+        env:
+          RUVECTOR_HOST: localhost
+          RUVECTOR_PORT: 5432
+          RUVECTOR_DB: distributed_postgres_cluster
+          RUVECTOR_USER: dpg_cluster
+          RUVECTOR_PASSWORD: dpg_cluster_2026
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: |
+          pytest tests/integration/test_distributed_cluster.py \
+            -v \
+            --tb=short \
+            --cov=src \
+            --cov-report=xml \
+            --cov-report=html \
+            --junitxml=test-results/junit.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-basic
+          path: |
+            test-results/
+            htmlcov/
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: integration-basic
+          name: basic-integration-coverage
+
+  # ====================================
+  # Redis Cache Tests
+  # ====================================
+  test-redis-cache:
+    name: Redis Cache Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: ruvnet/ruvector-postgres:latest
+        env:
+          POSTGRES_USER: dpg_cluster
+          POSTGRES_PASSWORD: dpg_cluster_2026
+          POSTGRES_DB: distributed_postgres_cluster
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dpg_cluster"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Initialize database
+        env:
+          PGPASSWORD: dpg_cluster_2026
+        run: |
+          psql -h localhost -U dpg_cluster -d distributed_postgres_cluster -f scripts/sql/init-ruvector.sql
+
+      - name: Run cache coherence tests
+        env:
+          RUVECTOR_HOST: localhost
+          RUVECTOR_PORT: 5432
+          RUVECTOR_DB: distributed_postgres_cluster
+          RUVECTOR_USER: dpg_cluster
+          RUVECTOR_PASSWORD: dpg_cluster_2026
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: |
+          pytest tests/integration/test_cache_coherence.py \
+            -v \
+            -m redis \
+            --tb=short \
+            --cov=src \
+            --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: integration-redis
+          name: redis-cache-coverage
+
+  # ====================================
+  # Citus Sharding Tests (Optional)
+  # ====================================
+  test-citus-sharding:
+    name: Citus Sharding Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: github.event_name == 'schedule' || github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'citus_sharding'
+
+    # This would require a full Citus setup with coordinator and workers
+    # Skipping for now - would need docker-compose orchestration
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Skip Citus tests
+        run: |
+          echo "Citus tests require complex docker-compose setup"
+          echo "Run locally with: docker-compose -f docker-compose.citus.yml up"
+          echo "Then: pytest tests/integration/test_citus_sharding.py -m citus"
+
+  # ====================================
+  # HA Failover Tests (Manual)
+  # ====================================
+  test-ha-failover:
+    name: HA Failover Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_suite == 'ha_failover'
+
+    # Patroni HA tests require multi-node setup
+    # These are meant to be run manually in staging/production-like environments
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Skip Patroni tests
+        run: |
+          echo "Patroni HA tests require multi-node cluster setup"
+          echo "Run in staging with: pytest tests/integration/test_ha_failover.py -m patroni"
+
+  # ====================================
+  # Load and Performance Tests
+  # ====================================
+  test-performance:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: github.event_name == 'schedule'
+
+    services:
+      postgres:
+        image: ruvnet/ruvector-postgres:latest
+        env:
+          POSTGRES_USER: dpg_cluster
+          POSTGRES_PASSWORD: dpg_cluster_2026
+          POSTGRES_DB: distributed_postgres_cluster
+          POSTGRES_SHARED_BUFFERS: 512MB
+          POSTGRES_MAX_CONNECTIONS: 200
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dpg_cluster"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-benchmark
+
+      - name: Initialize database
+        env:
+          PGPASSWORD: dpg_cluster_2026
+        run: |
+          psql -h localhost -U dpg_cluster -d distributed_postgres_cluster -f scripts/sql/init-ruvector.sql
+
+      - name: Run performance tests
+        env:
+          RUVECTOR_HOST: localhost
+          RUVECTOR_PORT: 5432
+          RUVECTOR_DB: distributed_postgres_cluster
+          RUVECTOR_USER: dpg_cluster
+          RUVECTOR_PASSWORD: dpg_cluster_2026
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: |
+          pytest tests/integration/ \
+            -v \
+            -m slow \
+            --tb=short \
+            --benchmark-only
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: .benchmarks/
+
+  # ====================================
+  # Integration Test Summary
+  # ====================================
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [test-basic-integration, test-redis-cache]
+    if: always()
+
+    steps:
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          path: all-test-results
+
+      - name: Publish test summary
+        run: |
+          echo "## Integration Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Suites" >> $GITHUB_STEP_SUMMARY
+          echo "- Basic Integration: ${{ needs.test-basic-integration.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Redis Cache: ${{ needs.test-redis-cache.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "View detailed results in artifacts." >> $GITHUB_STEP_SUMMARY

@@ -18,13 +18,15 @@ Auto-switching triggers:
 Thread-safe implementation with connection pool integration.
 """
 
+# Standard library imports
 import logging
 import threading
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Dict, Optional, Tuple
-from datetime import datetime
 
+# Third-party imports
 import psycopg2
 from psycopg2 import sql
 from psycopg2.pool import ThreadedConnectionPool
@@ -34,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 class ProfileType(Enum):
     """HNSW profile types for different use cases."""
+
     ACCURACY = "accuracy"
     BALANCED = "balanced"
     SPEED = "speed"
@@ -42,6 +45,7 @@ class ProfileType(Enum):
 @dataclass
 class HNSWProfile:
     """HNSW index profile configuration."""
+
     name: str
     m: int  # Maximum number of connections per layer
     ef_construction: int  # Size of dynamic candidate list for construction
@@ -65,7 +69,7 @@ PROFILES: Dict[ProfileType, HNSWProfile] = {
             "Best for: research, compliance, critical decisions. "
             "Use when: connections < 40% pool capacity. "
             "Trade-off: 2-4x slower than SPEED, but 99%+ recall."
-        )
+        ),
     ),
     ProfileType.BALANCED: HNSWProfile(
         name="balanced",
@@ -79,7 +83,7 @@ PROFILES: Dict[ProfileType, HNSWProfile] = {
             "Best for: standard operations, API endpoints, interactive queries. "
             "Use when: connections 40-80% pool capacity. "
             "Trade-off: 95-98% recall, moderate latency."
-        )
+        ),
     ),
     ProfileType.SPEED: HNSWProfile(
         name="speed",
@@ -93,7 +97,7 @@ PROFILES: Dict[ProfileType, HNSWProfile] = {
             "Best for: high load, batch processing, real-time systems. "
             "Use when: connections > 80% pool capacity. "
             "Trade-off: 90-95% recall, 2-4x faster than ACCURACY."
-        )
+        ),
     ),
 }
 
@@ -122,7 +126,7 @@ class HNSWProfileManager:
         schema: str = "claude_flow",
         auto_adjust: bool = True,
         load_threshold_high: float = 0.8,
-        load_threshold_low: float = 0.4
+        load_threshold_low: float = 0.4,
     ):
         """
         Initialize HNSW profile manager.
@@ -143,11 +147,7 @@ class HNSWProfileManager:
         self._current_profile = ProfileType.BALANCED
         self._lock = threading.RLock()  # Reentrant lock for nested calls
         self._switch_history = []  # Track profile switches
-        self._query_stats = {
-            "total_queries": 0,
-            "avg_latency_ms": 0.0,
-            "load_samples": []
-        }
+        self._query_stats = {"total_queries": 0, "avg_latency_ms": 0.0, "load_samples": []}
 
         logger.info(
             f"HNSWProfileManager initialized: schema={schema}, "
@@ -185,11 +185,7 @@ class HNSWProfileManager:
         """
         return {p.value: PROFILES[p] for p in ProfileType}
 
-    def switch_profile(
-        self,
-        profile_type: ProfileType,
-        reason: str = "Manual switch"
-    ) -> bool:
+    def switch_profile(self, profile_type: ProfileType, reason: str = "Manual switch") -> bool:
         """
         Switch to specified HNSW profile.
 
@@ -214,10 +210,7 @@ class HNSWProfileManager:
                 try:
                     with conn.cursor() as cur:
                         # Set ef_search for current session
-                        cur.execute(
-                            sql.SQL("SET hnsw.ef_search = %s"),
-                            [profile.ef_search]
-                        )
+                        cur.execute(sql.SQL("SET hnsw.ef_search = %s"), [profile.ef_search])
                         conn.commit()
 
                         logger.info(
@@ -227,13 +220,15 @@ class HNSWProfileManager:
                         )
 
                         # Record switch in history
-                        self._switch_history.append({
-                            "timestamp": datetime.utcnow().isoformat(),
-                            "from_profile": old_profile.name,
-                            "to_profile": profile.name,
-                            "reason": reason,
-                            "ef_search_change": f"{old_profile.ef_search}→{profile.ef_search}"
-                        })
+                        self._switch_history.append(
+                            {
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "from_profile": old_profile.name,
+                                "to_profile": profile.name,
+                                "reason": reason,
+                                "ef_search_change": f"{old_profile.ef_search}→{profile.ef_search}",
+                            }
+                        )
 
                         # Update current profile
                         self._current_profile = profile_type
@@ -289,7 +284,7 @@ class HNSWProfileManager:
             # Get pool statistics
             # Note: ThreadedConnectionPool doesn't expose usage directly
             # This is a simplified calculation - in production, use connection pool metrics
-            if hasattr(self.pool, '_used'):
+            if hasattr(self.pool, "_used"):
                 used = len(self.pool._used)
             else:
                 # Fallback: estimate from pool
@@ -299,12 +294,14 @@ class HNSWProfileManager:
             ratio = used / total if total > 0 else 0.0
 
             # Record load sample for analysis
-            self._query_stats["load_samples"].append({
-                "timestamp": datetime.utcnow().isoformat(),
-                "load_ratio": ratio,
-                "connections_used": used,
-                "connections_total": total
-            })
+            self._query_stats["load_samples"].append(
+                {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "load_ratio": ratio,
+                    "connections_used": used,
+                    "connections_total": total,
+                }
+            )
 
             # Keep only last 100 samples
             if len(self._query_stats["load_samples"]) > 100:
@@ -334,9 +331,7 @@ class HNSWProfileManager:
             return ProfileType.ACCURACY
 
     def get_recommendation(
-        self,
-        query_pattern: Optional[str] = None,
-        expected_qps: Optional[int] = None
+        self, query_pattern: Optional[str] = None, expected_qps: Optional[int] = None
     ) -> Tuple[ProfileType, str]:
         """
         Get profile recommendation based on query pattern and load.
@@ -393,28 +388,23 @@ class HNSWProfileManager:
                 "load_stats": {
                     "current_load": self._calculate_load_ratio(),
                     "threshold_high": self.load_threshold_high,
-                    "threshold_low": self.load_threshold_low
-                }
+                    "threshold_low": self.load_threshold_low,
+                },
             }
 
     def reset_stats(self):
         """Reset all statistics and switch history."""
         with self._lock:
             self._switch_history.clear()
-            self._query_stats = {
-                "total_queries": 0,
-                "avg_latency_ms": 0.0,
-                "load_samples": []
-            }
+            self._query_stats = {"total_queries": 0, "avg_latency_ms": 0.0, "load_samples": []}
             logger.info("Profile manager statistics reset")
 
 
 # Convenience functions for direct usage
 
+
 def create_profile_manager(
-    pool: ThreadedConnectionPool,
-    schema: str = "claude_flow",
-    **kwargs
+    pool: ThreadedConnectionPool, schema: str = "claude_flow", **kwargs
 ) -> HNSWProfileManager:
     """
     Create and initialize HNSW profile manager.
@@ -449,7 +439,7 @@ def print_profile_info(profile: HNSWProfile):
     print(f"\nUse Case:")
     print(f"  {profile.use_case}")
     print(f"\nDescription:")
-    for line in profile.description.split('. '):
+    for line in profile.description.split(". "):
         if line.strip():
             print(f"  • {line.strip()}")
     print(f"{'='*70}\n")

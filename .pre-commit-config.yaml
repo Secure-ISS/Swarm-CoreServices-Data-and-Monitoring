@@ -131,14 +131,14 @@ repos:
     hooks:
       - id: prevent-env-files
         name: prevent-env-files - Block .env commits
-        entry: bash -c 'git diff --cached --name-only | grep -E "\.env$" && echo "ERROR: .env file detected! Use .env.example instead." && exit 1 || exit 0'
+        entry: bash -c 'git diff --cached --name-only | grep -E "\.env$" && echo "ERROR - .env file detected! Use .env.example instead." && exit 1 || exit 0'
         language: system
         pass_filenames: false
 
       # Check for SQL injection patterns
       - id: check-sql-injection
         name: check-sql-injection - Detect unsafe SQL patterns
-        entry: bash -c 'grep -rn --include="*.py" -E "(execute\(.*\%|execute\(.*\+|execute\(.*f\"|cursor\.execute\(f\")" src/ tests/ && echo "ERROR: Potential SQL injection detected! Use parameterized queries." && exit 1 || exit 0'
+        entry: bash -c 'grep -rn --include="*.py" -E "(execute\(.*\%|execute\(.*\+|execute\(.*f\"|cursor\.execute\(f\")" src/ tests/ && echo "ERROR - Potential SQL injection detected! Use parameterized queries." && exit 1 || exit 0'
         language: system
         pass_filenames: false
 

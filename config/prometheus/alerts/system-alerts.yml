@@ -1,0 +1,171 @@
+# System alerting rules
+
+groups:
+  - name: system
+    interval: 15s
+    rules:
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: |
+          (100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value | humanize }}% on {{ $labels.instance }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/high-cpu"
+
+      # Critical CPU usage
+      - alert: CriticalCPUUsage
+        expr: |
+          (100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 95
+        for: 5m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "Critical CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value | humanize }}% on {{ $labels.instance }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/critical-cpu"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/high-memory"
+
+      # Critical memory usage
+      - alert: CriticalMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.95
+        for: 5m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "Critical memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/critical-memory"
+
+      # Disk space low
+      - alert: DiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"} /
+           node_filesystem_size_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"}) < 0.2
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Disk space low on {{ $labels.instance }}"
+          description: "Disk {{ $labels.mountpoint }} has {{ $value | humanizePercentage }} space remaining"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/disk-space-low"
+
+      # Disk space critical
+      - alert: DiskSpaceCritical
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"} /
+           node_filesystem_size_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs"}) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "Disk space critical on {{ $labels.instance }}"
+          description: "Disk {{ $labels.mountpoint }} has {{ $value | humanizePercentage }} space remaining"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/disk-space-critical"
+
+      # High disk I/O
+      - alert: HighDiskIO
+        expr: rate(node_disk_io_time_seconds_total[5m]) > 0.8
+        for: 15m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High disk I/O on {{ $labels.instance }}"
+          description: "Disk {{ $labels.device }} I/O utilization is {{ $value | humanizePercentage }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/high-disk-io"
+
+      # Inode usage high
+      - alert: HighInodeUsage
+        expr: |
+          (node_filesystem_files_free{fstype!~"tmpfs|fuse.lxcfs|squashfs"} /
+           node_filesystem_files{fstype!~"tmpfs|fuse.lxcfs|squashfs"}) < 0.2
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High inode usage on {{ $labels.instance }}"
+          description: "Filesystem {{ $labels.mountpoint }} has {{ $value | humanizePercentage }} inodes remaining"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/high-inode-usage"
+
+      # Network errors
+      - alert: NetworkErrors
+        expr: rate(node_network_receive_errs_total[5m]) > 10
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Network errors on {{ $labels.instance }}"
+          description: "Interface {{ $labels.device }} has {{ $value }} receive errors/s"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/network-errors"
+
+      # High network traffic
+      - alert: HighNetworkTraffic
+        expr: rate(node_network_receive_bytes_total[5m]) > 104857600
+        for: 15m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High network traffic on {{ $labels.instance }}"
+          description: "Interface {{ $labels.device }} receiving {{ $value | humanize }}B/s"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/high-network-traffic"
+
+      # System load high
+      - alert: HighSystemLoad
+        expr: node_load15 > (count by (instance) (node_cpu_seconds_total{mode="idle"})) * 1.5
+        for: 15m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High system load on {{ $labels.instance }}"
+          description: "15-minute load average is {{ $value }} on {{ $labels.instance }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/high-system-load"
+
+      # Clock skew
+      - alert: ClockSkew
+        expr: abs(node_timex_offset_seconds) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          category: system
+        annotations:
+          summary: "Clock skew detected on {{ $labels.instance }}"
+          description: "Clock offset is {{ $value }}s on {{ $labels.instance }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/clock-skew"
+
+      # Context switching high
+      - alert: HighContextSwitching
+        expr: rate(node_context_switches_total[5m]) > 10000
+        for: 15m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High context switching on {{ $labels.instance }}"
+          description: "Context switches are {{ $value }}/s on {{ $labels.instance }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/high-context-switching"

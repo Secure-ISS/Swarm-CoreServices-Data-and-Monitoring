@@ -10,6 +10,7 @@ Expected Performance Gains:
     - 90-99% recall across all profiles
 """
 
+# Standard library imports
 import sys
 import time
 from pathlib import Path
@@ -17,22 +18,23 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.db.pool import DualDatabasePools
-from src.db.vector_ops import VectorOperations
+# Local imports
 from src.db.hnsw_profiles import (
+    PROFILES,
     HNSWProfileManager,
     ProfileType,
     create_profile_manager,
     print_profile_info,
-    PROFILES
 )
+from src.db.pool import DualDatabasePools
+from src.db.vector_ops import VectorOperations
 
 
 def example_1_basic_usage():
     """Example 1: Basic profile switching."""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("EXAMPLE 1: Basic Profile Switching")
-    print("="*70)
+    print("=" * 70)
 
     # Initialize connections
     pools = DualDatabasePools()
@@ -40,9 +42,7 @@ def example_1_basic_usage():
 
     # Create profile manager
     manager = create_profile_manager(
-        pool,
-        schema="claude_flow",
-        auto_adjust=False  # Manual control for demo
+        pool, schema="claude_flow", auto_adjust=False  # Manual control for demo
     )
 
     # Show current profile
@@ -52,10 +52,7 @@ def example_1_basic_usage():
 
     # Switch to SPEED for high-load scenario
     print("\n[Scenario: Expecting high load, switching to SPEED]")
-    manager.switch_profile(
-        ProfileType.SPEED,
-        reason="High traffic expected"
-    )
+    manager.switch_profile(ProfileType.SPEED, reason="High traffic expected")
 
     current = manager.get_current_profile()
     print(f"New profile: {current.name}")
@@ -64,19 +61,16 @@ def example_1_basic_usage():
 
     # Return to balanced
     print("\n[Scenario: Load normalized, returning to BALANCED]")
-    manager.switch_profile(
-        ProfileType.BALANCED,
-        reason="Load returned to normal"
-    )
+    manager.switch_profile(ProfileType.BALANCED, reason="Load returned to normal")
 
     pools.close_all()
 
 
 def example_2_auto_adjustment():
     """Example 2: Automatic profile adjustment based on load."""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("EXAMPLE 2: Automatic Profile Adjustment")
-    print("="*70)
+    print("=" * 70)
 
     pools = DualDatabasePools()
     pool = pools.get_pool("shared")
@@ -87,7 +81,7 @@ def example_2_auto_adjustment():
         schema="claude_flow",
         auto_adjust=True,
         load_threshold_high=0.8,
-        load_threshold_low=0.4
+        load_threshold_low=0.4,
     )
 
     print("\nAuto-adjustment enabled:")
@@ -117,9 +111,9 @@ def example_2_auto_adjustment():
 
 def example_3_integration_with_vector_ops():
     """Example 3: Integration with vector operations."""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("EXAMPLE 3: Integration with Vector Operations")
-    print("="*70)
+    print("=" * 70)
 
     pools = DualDatabasePools()
     pool = pools.get_pool("shared")
@@ -136,22 +130,16 @@ def example_3_integration_with_vector_ops():
 
     # Simulate batch insert
     print("Inserting embeddings with SPEED profile...")
+    # Third-party imports
     import numpy as np
 
     for i in range(5):
         embedding = np.random.rand(384).tolist()
-        metadata = {
-            "source": f"batch_document_{i}",
-            "type": "test",
-            "batch": "speed_demo"
-        }
+        metadata = {"source": f"batch_document_{i}", "type": "test", "batch": "speed_demo"}
 
         try:
             vector_ops.insert_embedding(
-                embedding=embedding,
-                metadata=metadata,
-                schema="claude_flow",
-                table="embeddings"
+                embedding=embedding, metadata=metadata, schema="claude_flow", table="embeddings"
             )
             print(f"  Inserted document {i+1}/5")
         except Exception as e:
@@ -167,10 +155,7 @@ def example_3_integration_with_vector_ops():
 
     try:
         results = vector_ops.search_similar(
-            query_embedding=query_embedding,
-            schema="claude_flow",
-            table="embeddings",
-            limit=5
+            query_embedding=query_embedding, schema="claude_flow", table="embeddings", limit=5
         )
         print(f"  Found {len(results)} results with high precision")
     except Exception as e:
@@ -184,9 +169,9 @@ def example_3_integration_with_vector_ops():
 
 def example_4_query_pattern_recommendations():
     """Example 4: Get recommendations based on query patterns."""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("EXAMPLE 4: Query Pattern Recommendations")
-    print("="*70)
+    print("=" * 70)
 
     pools = DualDatabasePools()
     pool = pools.get_pool("shared")
@@ -203,10 +188,7 @@ def example_4_query_pattern_recommendations():
     print("\nRecommendations for different scenarios:\n")
 
     for pattern, qps, description in scenarios:
-        profile, reasoning = manager.get_recommendation(
-            query_pattern=pattern,
-            expected_qps=qps
-        )
+        profile, reasoning = manager.get_recommendation(query_pattern=pattern, expected_qps=qps)
 
         print(f"Scenario: {description}")
         print(f"  Pattern: {pattern or 'None'}, QPS: {qps}")
@@ -219,9 +201,9 @@ def example_4_query_pattern_recommendations():
 
 def example_5_performance_monitoring():
     """Example 5: Monitor profile switches and performance."""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("EXAMPLE 5: Performance Monitoring")
-    print("="*70)
+    print("=" * 70)
 
     pools = DualDatabasePools()
     pool = pools.get_pool("shared")
@@ -250,21 +232,24 @@ def example_5_performance_monitoring():
     print(f"  Current Load: {stats['load_stats']['current_load']:.1%}")
 
     print("\nRecent Switch History:")
-    for switch in stats['recent_switches']:
-        print(f"  {switch['timestamp'][:19]} | "
-              f"{switch['from_profile']} → {switch['to_profile']} | "
-              f"{switch['reason']}")
+    for switch in stats["recent_switches"]:
+        print(
+            f"  {switch['timestamp'][:19]} | "
+            f"{switch['from_profile']} → {switch['to_profile']} | "
+            f"{switch['reason']}"
+        )
 
     pools.close_all()
 
 
 def example_6_best_practices():
     """Example 6: Best practices for production use."""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("EXAMPLE 6: Production Best Practices")
-    print("="*70)
+    print("=" * 70)
 
-    print("""
+    print(
+        """
 Best Practices for HNSW Profile Management:
 
 1. AUTO-ADJUSTMENT
@@ -300,9 +285,11 @@ Best Practices for HNSW Profile Management:
    ✓ Monitor profile manager health
 
 Example Production Setup:
-    """)
+    """
+    )
 
-    print("""
+    print(
+        """
     # Initialize with monitoring
     pools = DualDatabasePools()
     manager = create_profile_manager(
@@ -356,14 +343,15 @@ Example Production Setup:
             ProfileType.BALANCED,
             "Query complete"
         )
-    """)
+    """
+    )
 
 
 def print_all_profiles():
     """Print detailed information about all profiles."""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("HNSW PROFILE REFERENCE")
-    print("="*70)
+    print("=" * 70)
 
     for profile_type in ProfileType:
         print_profile_info(PROFILES[profile_type])
@@ -371,9 +359,9 @@ def print_all_profiles():
 
 def main():
     """Run all examples."""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("HNSW DUAL-PROFILE STRATEGY - USAGE EXAMPLES")
-    print("="*70)
+    print("=" * 70)
     print("\nThis demonstrates dynamic performance optimization")
     print("with automatic profile switching based on load.")
     print(f"\nExpected benefits:")
@@ -393,13 +381,15 @@ def main():
         example_5_performance_monitoring()
         example_6_best_practices()
 
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("All examples completed successfully!")
-        print("="*70 + "\n")
+        print("=" * 70 + "\n")
 
     except Exception as e:
         print(f"\n[ERROR] Example failed: {e}")
+        # Standard library imports
         import traceback
+
         traceback.print_exc()
         return 1
 

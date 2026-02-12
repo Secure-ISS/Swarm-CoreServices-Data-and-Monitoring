@@ -565,11 +565,14 @@ class DistributedDatabasePool:
         logger.info("✓ All distributed pools closed")
 
 
-def create_pool_from_env() -> DistributedDatabasePool:
+def create_pool_from_env(enable_patroni: bool = None) -> DistributedDatabasePool:
     """Create a distributed pool from environment variables.
 
     Environment variables:
-        # Coordinator (required)
+        # Mode Selection
+        ENABLE_PATRONI=true - Enable Patroni HA mode (overrides standard config)
+
+        # Coordinator (required for non-Patroni mode)
         COORDINATOR_HOST, COORDINATOR_PORT, COORDINATOR_DB,
         COORDINATOR_USER, COORDINATOR_PASSWORD
 
@@ -581,9 +584,29 @@ def create_pool_from_env() -> DistributedDatabasePool:
         REPLICA_HOSTS, REPLICA_PORTS, REPLICA_DBS,
         REPLICA_USERS, REPLICA_PASSWORDS
 
+        # Patroni HA (when ENABLE_PATRONI=true)
+        PATRONI_HOSTS, PATRONI_PORT, PATRONI_DB,
+        PATRONI_USER, PATRONI_PASSWORD
+
+    Args:
+        enable_patroni: Force Patroni mode on/off. If None, auto-detect from ENABLE_PATRONI env var.
+
     Returns:
-        DistributedDatabasePool instance
+        DistributedDatabasePool instance (or PatroniHAPool if Patroni mode)
     """
+    # Check if Patroni mode is enabled
+    if enable_patroni is None:
+        enable_patroni = os.getenv("ENABLE_PATRONI", "false").lower() == "true"
+
+    if enable_patroni:
+        logger.info("Patroni HA mode enabled for distributed pool")
+        # In Patroni mode, return a wrapped PatroniHAPool
+        # The distributed pool interface is compatible
+        from .patroni_pool import create_patroni_pool_from_env
+
+        return create_patroni_pool_from_env()
+
+    # Standard distributed mode (coordinator + workers + replicas)
     # Coordinator node (required)
     coordinator_password = os.getenv("COORDINATOR_PASSWORD")
     if not coordinator_password:
@@ -662,11 +685,18 @@ def create_pool_from_env() -> DistributedDatabasePool:
 _distributed_pool: Optional[DistributedDatabasePool] = None
 
 
-def get_distributed_pool() -> DistributedDatabasePool:
-    """Get or create the global distributed pool instance."""
+def get_distributed_pool(enable_patroni: bool = None) -> DistributedDatabasePool:
+    """Get or create the global distributed pool instance.
+
+    Args:
+        enable_patroni: Force Patroni mode on/off. If None, auto-detect from environment.
+
+    Returns:
+        DistributedDatabasePool instance (or PatroniHAPool if Patroni mode)
+    """
     global _distributed_pool
     if _distributed_pool is None:
-        _distributed_pool = create_pool_from_env()
+        _distributed_pool = create_pool_from_env(enable_patroni=enable_patroni)
     return _distributed_pool
 
 

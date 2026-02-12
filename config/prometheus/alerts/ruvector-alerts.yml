@@ -1,0 +1,139 @@
+# RuVector-specific alerting rules
+
+groups:
+  - name: ruvector
+    interval: 15s
+    rules:
+      # RuVector search latency high
+      - alert: RuVectorSearchLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            rate(ruvector_search_latency_seconds_bucket[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+          component: ruvector
+        annotations:
+          summary: "RuVector search latency high on {{ $labels.instance }}"
+          description: "95th percentile search latency is {{ $value }}s for {{ $labels.schemaname }}.{{ $labels.tablename }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/ruvector-latency"
+
+      # RuVector search latency critical
+      - alert: RuVectorSearchLatencyCritical
+        expr: |
+          histogram_quantile(0.95,
+            rate(ruvector_search_latency_seconds_bucket[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          category: performance
+          component: ruvector
+        annotations:
+          summary: "RuVector search latency critical on {{ $labels.instance }}"
+          description: "95th percentile search latency is {{ $value }}s for {{ $labels.schemaname }}.{{ $labels.tablename }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/ruvector-latency-critical"
+
+      # RuVector index size growing rapidly
+      - alert: RuVectorIndexGrowthHigh
+        expr: |
+          rate(ruvector_index_size_bytes[1h]) > 10485760
+        for: 2h
+        labels:
+          severity: warning
+          category: database
+          component: ruvector
+        annotations:
+          summary: "RuVector index growing rapidly on {{ $labels.instance }}"
+          description: "Index {{ $labels.index_name }} is growing at {{ $value | humanize }}B/s"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/ruvector-index-growth"
+
+      # RuVector vector count anomaly
+      - alert: RuVectorCountAnomaly
+        expr: |
+          abs(
+            ruvector_vector_count -
+            avg_over_time(ruvector_vector_count[1h])
+          ) / avg_over_time(ruvector_vector_count[1h]) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          category: database
+          component: ruvector
+        annotations:
+          summary: "RuVector count anomaly on {{ $labels.instance }}"
+          description: "Vector count changed by {{ $value | humanizePercentage }} in {{ $labels.schemaname }}.{{ $labels.tablename }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/ruvector-count-anomaly"
+
+      # RuVector HNSW index scan ratio low
+      - alert: RuVectorHNSWEfficiencyLow
+        expr: |
+          (sum by (schemaname, tablename) (rate(pg_stat_user_indexes_idx_tup_fetch[5m])) /
+           sum by (schemaname, tablename) (rate(pg_stat_user_indexes_idx_tup_read[5m]))) < 0.5
+        for: 20m
+        labels:
+          severity: warning
+          category: performance
+          component: ruvector
+        annotations:
+          summary: "RuVector HNSW efficiency low on {{ $labels.instance }}"
+          description: "HNSW index fetch ratio is {{ $value | humanizePercentage }} for {{ $labels.schemaname }}.{{ $labels.tablename }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/ruvector-hnsw-efficiency"
+
+      # RuVector table not analyzed recently
+      - alert: RuVectorTableNotAnalyzed
+        expr: |
+          (time() - pg_stat_user_tables_last_autoanalyze) > 86400
+        for: 1h
+        labels:
+          severity: warning
+          category: database
+          component: ruvector
+        annotations:
+          summary: "RuVector table not analyzed recently on {{ $labels.instance }}"
+          description: "Table {{ $labels.schemaname }}.{{ $labels.tablename }} has not been analyzed in {{ $value | humanizeDuration }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/ruvector-not-analyzed"
+
+      # RuVector memory usage high
+      - alert: RuVectorMemoryUsageHigh
+        expr: |
+          (sum by (instance) (ruvector_index_size_bytes) /
+           node_memory_MemTotal_bytes) > 0.3
+        for: 15m
+        labels:
+          severity: warning
+          category: performance
+          component: ruvector
+        annotations:
+          summary: "RuVector memory usage high on {{ $labels.instance }}"
+          description: "RuVector indexes are using {{ $value | humanizePercentage }} of total memory"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/ruvector-memory-high"
+
+      # RuVector operation errors
+      - alert: RuVectorOperationErrors
+        expr: |
+          rate(ruvector_index_operations_total{operation="error"}[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          category: database
+          component: ruvector
+        annotations:
+          summary: "RuVector operation errors on {{ $labels.instance }}"
+          description: "RuVector errors at {{ $value }}/s on {{ $labels.schemaname }}.{{ $labels.tablename }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/ruvector-errors"
+
+      # RuVector index build slow
+      - alert: RuVectorIndexBuildSlow
+        expr: |
+          rate(ruvector_index_operations_total{operation="build"}[5m]) < 0.1 and
+          ruvector_index_operations_total{operation="build"} > 0
+        for: 30m
+        labels:
+          severity: warning
+          category: performance
+          component: ruvector
+        annotations:
+          summary: "RuVector index build slow on {{ $labels.instance }}"
+          description: "Index build rate is {{ $value }}/s on {{ $labels.schemaname }}.{{ $labels.tablename }}"
+          runbook_url: "https://docs.dpg-cluster.local/runbooks/ruvector-index-build-slow"

@@ -8,14 +8,15 @@ Runs all domain tests with detailed reporting:
 - Domain isolation tests
 """
 
+# Standard library imports
 import os
 import sys
-import unittest
 import time
-from typing import Dict, Any
+import unittest
+from typing import Any, Dict
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 def run_test_suite(suite_name: str, test_module) -> Dict[str, Any]:
@@ -37,13 +38,13 @@ def run_test_suite(suite_name: str, test_module) -> Dict[str, Any]:
     duration = time.time() - start_time
 
     return {
-        'name': suite_name,
-        'tests_run': result.testsRun,
-        'failures': len(result.failures),
-        'errors': len(result.errors),
-        'skipped': len(result.skipped),
-        'success': result.wasSuccessful(),
-        'duration': duration
+        "name": suite_name,
+        "tests_run": result.testsRun,
+        "failures": len(result.failures),
+        "errors": len(result.errors),
+        "skipped": len(result.skipped),
+        "success": result.wasSuccessful(),
+        "duration": duration,
     }
 
 
@@ -53,17 +54,17 @@ def print_summary(results):
     print("TEST SUMMARY")
     print(f"{'=' * 70}\n")
 
-    total_tests = sum(r['tests_run'] for r in results)
-    total_failures = sum(r['failures'] for r in results)
-    total_errors = sum(r['errors'] for r in results)
-    total_skipped = sum(r['skipped'] for r in results)
-    total_duration = sum(r['duration'] for r in results)
+    total_tests = sum(r["tests_run"] for r in results)
+    total_failures = sum(r["failures"] for r in results)
+    total_errors = sum(r["errors"] for r in results)
+    total_skipped = sum(r["skipped"] for r in results)
+    total_duration = sum(r["duration"] for r in results)
 
     print(f"{'Suite':<40} {'Tests':<10} {'Status':<10} {'Time':<10}")
     print(f"{'-' * 70}")
 
     for result in results:
-        status = '✓ PASS' if result['success'] else '✗ FAIL'
+        status = "✓ PASS" if result["success"] else "✗ FAIL"
         print(
             f"{result['name']:<40} "
             f"{result['tests_run']:<10} "
@@ -103,20 +104,18 @@ def main():
     print("=" * 70)
 
     try:
+        # Local imports
         from tests.domains.security import test_cve_remediation
-        results.append(run_test_suite(
-            "Security: CVE Remediation",
-            test_cve_remediation
-        ))
+
+        results.append(run_test_suite("Security: CVE Remediation", test_cve_remediation))
     except Exception as e:
         print(f"Failed to load CVE remediation tests: {e}")
 
     try:
+        # Local imports
         from tests.domains.security import test_authentication
-        results.append(run_test_suite(
-            "Security: Authentication",
-            test_authentication
-        ))
+
+        results.append(run_test_suite("Security: Authentication", test_authentication))
     except Exception as e:
         print(f"Failed to load authentication tests: {e}")
 
@@ -126,29 +125,26 @@ def main():
     print("=" * 70)
 
     try:
+        # Local imports
         from tests.domains.integration import test_mcp_server
-        results.append(run_test_suite(
-            "Integration: MCP Server",
-            test_mcp_server
-        ))
+
+        results.append(run_test_suite("Integration: MCP Server", test_mcp_server))
     except Exception as e:
         print(f"Failed to load MCP server tests: {e}")
 
     try:
+        # Local imports
         from tests.domains.integration import test_event_bus
-        results.append(run_test_suite(
-            "Integration: Event Bus",
-            test_event_bus
-        ))
+
+        results.append(run_test_suite("Integration: Event Bus", test_event_bus))
     except Exception as e:
         print(f"Failed to load event bus tests: {e}")
 
     try:
+        # Local imports
         from tests.domains.integration import test_e2e_flows
-        results.append(run_test_suite(
-            "Integration: End-to-End Flows",
-            test_e2e_flows
-        ))
+
+        results.append(run_test_suite("Integration: End-to-End Flows", test_e2e_flows))
     except Exception as e:
         print(f"Failed to load E2E tests: {e}")
 
@@ -158,20 +154,20 @@ def main():
     print("=" * 70)
 
     try:
+        # Local imports
         from tests.domains.performance import test_security_performance
-        results.append(run_test_suite(
-            "Performance: Security Layer",
-            test_security_performance
-        ))
+
+        results.append(run_test_suite("Performance: Security Layer", test_security_performance))
     except Exception as e:
         print(f"Failed to load security performance tests: {e}")
 
     try:
+        # Local imports
         from tests.domains.performance import test_integration_performance
-        results.append(run_test_suite(
-            "Performance: Integration Layer",
-            test_integration_performance
-        ))
+
+        results.append(
+            run_test_suite("Performance: Integration Layer", test_integration_performance)
+        )
     except Exception as e:
         print(f"Failed to load integration performance tests: {e}")
 
@@ -181,11 +177,10 @@ def main():
     print("=" * 70)
 
     try:
+        # Local imports
         from tests.domains import test_domain_isolation
-        results.append(run_test_suite(
-            "Domain Isolation",
-            test_domain_isolation
-        ))
+
+        results.append(run_test_suite("Domain Isolation", test_domain_isolation))
     except Exception as e:
         print(f"Failed to load domain isolation tests: {e}")
 

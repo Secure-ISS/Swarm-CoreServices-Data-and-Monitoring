@@ -1,0 +1,180 @@
+version: '3.9'
+
+# Development Stack - 4GB Total Memory Budget
+# Single PostgreSQL node with RuVector + Redis cache
+# Optimized for local development with increased capacity
+#
+# Memory Allocation (4GB total):
+# - PostgreSQL: 2.4GB (1.8GB reserved, limit 2.4GB)
+# - Redis: 512MB (256MB reserved, limit 512MB)
+# - PgAdmin: 512MB (256MB reserved, limit 512MB) - optional
+# - System/App: ~600MB overhead
+
+services:
+  # PostgreSQL with RuVector - Primary database (2.4GB)
+  postgres:
+    image: ruvnet/ruvector-postgres:latest
+    container_name: dpg-postgres-dev
+    hostname: postgres-dev
+    environment:
+      # Database credentials (use .env file)
+      - POSTGRES_USER=${POSTGRES_USER:-dpg_cluster}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dpg_cluster_2026}
+      - POSTGRES_DB=${POSTGRES_DB:-distributed_postgres_cluster}
+
+      # Memory settings for 4GB dev environment
+      - POSTGRES_SHARED_BUFFERS=512MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=1GB
+      - POSTGRES_WORK_MEM=32MB
+      - POSTGRES_MAINTENANCE_WORK_MEM=128MB
+
+      # Connection settings (increased for higher capacity)
+      - POSTGRES_MAX_CONNECTIONS=100
+
+      # RuVector settings (optimized for 4GB)
+      - RUVECTOR_ENABLE_HNSW=on
+      - RUVECTOR_HNSW_M=16
+      - RUVECTOR_HNSW_EF_CONSTRUCTION=200
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+      - ./scripts/sql:/docker-entrypoint-initdb.d:ro
+
+    networks:
+      - dpg-dev-net
+
+    # Memory limits (2.4GB)
+    deploy:
+      resources:
+        limits:
+          memory: 2400M
+        reservations:
+          memory: 1800M
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dpg_cluster}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    restart: unless-stopped
+
+    command: >
+      postgres
+      -c shared_buffers=512MB
+      -c effective_cache_size=1GB
+      -c work_mem=32MB
+      -c maintenance_work_mem=128MB
+      -c max_connections=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c max_worker_processes=8
+      -c max_parallel_workers_per_gather=4
+      -c max_parallel_workers=8
+      -c wal_buffers=16MB
+      -c min_wal_size=1GB
+      -c max_wal_size=2GB
+
+  # Redis cache - Query caching (512MB)
+  redis:
+    image: redis:7-alpine
+    container_name: dpg-redis-dev
+    hostname: redis-dev
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - redis-dev-data:/data
+
+    networks:
+      - dpg-dev-net
+
+    # Memory limits (512MB)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+    command: >
+      redis-server
+      --maxmemory 450mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+      --appendfsync everysec
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+    restart: unless-stopped
+
+  # PgAdmin (optional - 512MB)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: dpg-pgadmin-dev
+    hostname: pgadmin-dev
+
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@dpg.local}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+
+    ports:
+      - "8080:80"
+
+    volumes:
+      - pgadmin-dev-data:/var/lib/pgadmin
+
+    networks:
+      - dpg-dev-net
+
+    # Memory limits (512MB)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+    profiles:
+      - tools  # Only start with --profile tools
+
+networks:
+  dpg-dev-net:
+    driver: bridge
+    name: dpg-dev-network
+
+volumes:
+  postgres-dev-data:
+    driver: local
+    name: dpg-postgres-dev-data
+  redis-dev-data:
+    driver: local
+    name: dpg-redis-dev-data
+  pgadmin-dev-data:
+    driver: local
+    name: dpg-pgadmin-dev-data
+
+# Usage:
+# Start minimal stack (Postgres + Redis): docker compose -f docker-compose.dev.yml up -d
+# Start with PgAdmin: docker compose -f docker-compose.dev.yml --profile tools up -d
+# Stop: docker compose -f docker-compose.dev.yml down
+# Clean volumes: docker compose -f docker-compose.dev.yml down -v

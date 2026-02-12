@@ -4,19 +4,17 @@
 Tests for authentication mechanisms and authorization controls.
 """
 
+# Standard library imports
 import os
 import sys
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
-from src.db.pool import (
-    DualDatabasePools,
-    DatabaseConnectionError,
-    DatabaseConfigurationError
-)
+# Local imports
+from src.db.pool import DatabaseConfigurationError, DatabaseConnectionError, DualDatabasePools
 
 
 class TestAuthenticationValidation(unittest.TestCase):
@@ -33,20 +31,24 @@ class TestAuthenticationValidation(unittest.TestCase):
 
     def test_invalid_credentials_fail_fast(self):
         """Test that invalid credentials fail within timeout."""
+        # Standard library imports
         import time
 
-        with patch.dict(os.environ, {
-            'RUVECTOR_HOST': 'localhost',
-            'RUVECTOR_PORT': '5432',
-            'RUVECTOR_DB': 'test_db',
-            'RUVECTOR_USER': 'invalid_user',
-            'RUVECTOR_PASSWORD': 'invalid_password',
-            'SHARED_KNOWLEDGE_HOST': 'localhost',
-            'SHARED_KNOWLEDGE_PORT': '5432',
-            'SHARED_KNOWLEDGE_DB': 'shared_db',
-            'SHARED_KNOWLEDGE_USER': 'invalid_user',
-            'SHARED_KNOWLEDGE_PASSWORD': 'invalid_password'
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "RUVECTOR_HOST": "localhost",
+                "RUVECTOR_PORT": "5432",
+                "RUVECTOR_DB": "test_db",
+                "RUVECTOR_USER": "invalid_user",
+                "RUVECTOR_PASSWORD": "invalid_password",
+                "SHARED_KNOWLEDGE_HOST": "localhost",
+                "SHARED_KNOWLEDGE_PORT": "5432",
+                "SHARED_KNOWLEDGE_DB": "shared_db",
+                "SHARED_KNOWLEDGE_USER": "invalid_user",
+                "SHARED_KNOWLEDGE_PASSWORD": "invalid_password",
+            },
+        ):
             start = time.time()
 
             with self.assertRaises(DatabaseConnectionError):
@@ -60,13 +62,17 @@ class TestAuthenticationValidation(unittest.TestCase):
     def test_partial_credentials_rejected(self):
         """Test that partial credentials are rejected."""
         # Missing password
-        with patch.dict(os.environ, {
-            'RUVECTOR_HOST': 'localhost',
-            'RUVECTOR_PORT': '5432',
-            'RUVECTOR_DB': 'test_db',
-            'RUVECTOR_USER': 'test_user',
-            # RUVECTOR_PASSWORD missing
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "RUVECTOR_HOST": "localhost",
+                "RUVECTOR_PORT": "5432",
+                "RUVECTOR_DB": "test_db",
+                "RUVECTOR_USER": "test_user",
+                # RUVECTOR_PASSWORD missing
+            },
+            clear=True,
+        ):
             with self.assertRaises(DatabaseConfigurationError) as ctx:
                 DualDatabasePools()
 
@@ -74,11 +80,15 @@ class TestAuthenticationValidation(unittest.TestCase):
 
     def test_credential_validation_order(self):
         """Test that credentials are validated before connection attempts."""
-        with patch.dict(os.environ, {
-            'RUVECTOR_HOST': 'localhost',
-            'RUVECTOR_PORT': '5432',
-            # Missing DB, USER, PASSWORD
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "RUVECTOR_HOST": "localhost",
+                "RUVECTOR_PORT": "5432",
+                # Missing DB, USER, PASSWORD
+            },
+            clear=True,
+        ):
             # Should raise config error, not connection error
             with self.assertRaises(DatabaseConfigurationError):
                 DualDatabasePools()
@@ -98,7 +108,7 @@ class TestAuthorizationControls(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up pools."""
-        if hasattr(cls, 'pools'):
+        if hasattr(cls, "pools"):
             cls.pools.close()
 
     def test_read_authorization(self):
@@ -107,33 +117,34 @@ class TestAuthorizationControls(unittest.TestCase):
             # Should have SELECT permission
             cur.execute("SELECT 1 as test")
             result = cur.fetchone()
-            self.assertEqual(result['test'], 1)
+            self.assertEqual(result["test"], 1)
 
     def test_write_authorization(self):
         """Test that write operations require proper authorization."""
         with self.pools.project_cursor() as cur:
             # Should have INSERT/UPDATE permission
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS test_auth_writes (
                     id SERIAL PRIMARY KEY,
                     data TEXT
                 )
-            """)
-
-            cur.execute(
-                "INSERT INTO test_auth_writes (data) VALUES (%s)",
-                ("test_data",)
+            """
             )
+
+            cur.execute("INSERT INTO test_auth_writes (data) VALUES (%s)", ("test_data",))
 
     def test_ddl_authorization(self):
         """Test that DDL operations are properly authorized."""
         with self.pools.project_cursor() as cur:
             # Should have CREATE TABLE permission
-            cur.execute("""
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS test_auth_ddl (
                     id SERIAL PRIMARY KEY
                 )
-            """)
+            """
+            )
 
             cur.execute("DROP TABLE IF EXISTS test_auth_ddl")
 
@@ -141,12 +152,14 @@ class TestAuthorizationControls(unittest.TestCase):
         """Test that system tables are properly protected."""
         with self.pools.project_cursor() as cur:
             # Should be able to read system tables
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT tablename
                 FROM pg_tables
                 WHERE schemaname = 'public'
                 LIMIT 1
-            """)
+            """
+            )
 
             # Should not be able to modify system tables
             try:
@@ -171,7 +184,7 @@ class TestConnectionSecurity(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Clean up pools."""
-        if hasattr(cls, 'pools'):
+        if hasattr(cls, "pools"):
             cls.pools.close()
 
     def test_connection_pooling_limits(self):
@@ -195,20 +208,24 @@ class TestConnectionSecurity(unittest.TestCase):
 
     def test_connection_timeout_enforced(self):
         """Test that connection timeout is enforced."""
+        # Standard library imports
         import time
 
-        with patch.dict(os.environ, {
-            'RUVECTOR_HOST': 'localhost',
-            'RUVECTOR_PORT': '9999',  # Wrong port
-            'RUVECTOR_DB': 'test_db',
-            'RUVECTOR_USER': 'test_user',
-            'RUVECTOR_PASSWORD': 'test_password',
-            'SHARED_KNOWLEDGE_HOST': 'localhost',
-            'SHARED_KNOWLEDGE_PORT': '5432',
-            'SHARED_KNOWLEDGE_DB': 'shared_db',
-            'SHARED_KNOWLEDGE_USER': 'test_user',
-            'SHARED_KNOWLEDGE_PASSWORD': 'test_password'
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "RUVECTOR_HOST": "localhost",
+                "RUVECTOR_PORT": "9999",  # Wrong port
+                "RUVECTOR_DB": "test_db",
+                "RUVECTOR_USER": "test_user",
+                "RUVECTOR_PASSWORD": "test_password",
+                "SHARED_KNOWLEDGE_HOST": "localhost",
+                "SHARED_KNOWLEDGE_PORT": "5432",
+                "SHARED_KNOWLEDGE_DB": "shared_db",
+                "SHARED_KNOWLEDGE_USER": "test_user",
+                "SHARED_KNOWLEDGE_PASSWORD": "test_password",
+            },
+        ):
             start = time.time()
 
             with self.assertRaises(DatabaseConnectionError):
@@ -224,10 +241,10 @@ class TestConnectionSecurity(unittest.TestCase):
         health = self.pools.health_check()
 
         # Verify connection parameters
-        if health['project']['status'] == 'healthy':
+        if health["project"]["status"] == "healthy":
             # Connection should be established
-            self.assertIn('database', health['project'])
-            self.assertIn('user', health['project'])
+            self.assertIn("database", health["project"])
+            self.assertIn("user", health["project"])
 
             # Verify user has appropriate permissions
             with self.pools.project_cursor() as cur:
@@ -241,29 +258,33 @@ class TestSecurityLogging(unittest.TestCase):
 
     def test_connection_failures_logged(self):
         """Test that connection failures are properly logged."""
+        # Standard library imports
         import logging
         from io import StringIO
 
         # Capture log output
         log_capture = StringIO()
         handler = logging.StreamHandler(log_capture)
-        logger = logging.getLogger('src.db.pool')
+        logger = logging.getLogger("src.db.pool")
         logger.addHandler(handler)
         logger.setLevel(logging.ERROR)
 
         try:
-            with patch.dict(os.environ, {
-                'RUVECTOR_HOST': 'localhost',
-                'RUVECTOR_PORT': '9999',
-                'RUVECTOR_DB': 'test_db',
-                'RUVECTOR_USER': 'test_user',
-                'RUVECTOR_PASSWORD': 'test_password',
-                'SHARED_KNOWLEDGE_HOST': 'localhost',
-                'SHARED_KNOWLEDGE_PORT': '5432',
-                'SHARED_KNOWLEDGE_DB': 'shared_db',
-                'SHARED_KNOWLEDGE_USER': 'test_user',
-                'SHARED_KNOWLEDGE_PASSWORD': 'test_password'
-            }):
+            with patch.dict(
+                os.environ,
+                {
+                    "RUVECTOR_HOST": "localhost",
+                    "RUVECTOR_PORT": "9999",
+                    "RUVECTOR_DB": "test_db",
+                    "RUVECTOR_USER": "test_user",
+                    "RUVECTOR_PASSWORD": "test_password",
+                    "SHARED_KNOWLEDGE_HOST": "localhost",
+                    "SHARED_KNOWLEDGE_PORT": "5432",
+                    "SHARED_KNOWLEDGE_DB": "shared_db",
+                    "SHARED_KNOWLEDGE_USER": "test_user",
+                    "SHARED_KNOWLEDGE_PASSWORD": "test_password",
+                },
+            ):
                 with self.assertRaises(DatabaseConnectionError):
                     DualDatabasePools()
 
@@ -280,12 +301,13 @@ class TestSecurityLogging(unittest.TestCase):
         except Exception as e:
             raise unittest.SkipTest(f"Database not available: {e}")
 
+        # Standard library imports
         import logging
         from io import StringIO
 
         log_capture = StringIO()
         handler = logging.StreamHandler(log_capture)
-        logger = logging.getLogger('src.db.pool')
+        logger = logging.getLogger("src.db.pool")
         logger.addHandler(handler)
         logger.setLevel(logging.ERROR)
 

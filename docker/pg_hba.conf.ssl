@@ -1,0 +1,181 @@
+# PostgreSQL Host-Based Authentication Configuration with SSL Enforcement
+# pg_hba.conf - Client authentication configuration file
+#
+# This configuration REQUIRES SSL/TLS for all connections and rejects non-SSL attempts
+#
+# Usage:
+# 1. Copy this file to your PostgreSQL data directory
+# 2. Ensure SSL is enabled in postgresql.conf
+# 3. Restart PostgreSQL: docker restart ruvector-db
+#
+# Format:
+# TYPE  DATABASE        USER            ADDRESS                 METHOD  OPTIONS
+#
+# TYPE: Connection type (local, host, hostssl, hostnossl, hostgssenc, hostnogssenc)
+# DATABASE: Database name (all, specific name, @file, sameuser, samerole, replication)
+# USER: Username (all, specific name, @file, +group)
+# ADDRESS: IP address/range (CIDR notation)
+# METHOD: Authentication method (trust, reject, scram-sha-256, md5, password, peer, cert, etc.)
+
+# ===============================
+# SSL/TLS Required Configuration
+# ===============================
+
+# REJECT all non-SSL connection attempts
+# This ensures that only encrypted connections are allowed
+hostnossl   all             all             0.0.0.0/0               reject
+hostnossl   all             all             ::/0                    reject
+
+# ===============================
+# Local Connections (Unix socket)
+# ===============================
+
+# Local connections are considered secure (same machine)
+# Use peer authentication for local connections
+local       all             postgres                                peer
+local       all             all                                     peer
+local       replication     all                                     peer
+
+# ===============================
+# SSL/TLS Connections - Standard Authentication
+# ===============================
+
+# Allow SSL connections with password authentication
+# Use scram-sha-256 for best security (requires PostgreSQL 10+)
+hostssl     all             all             0.0.0.0/0               scram-sha-256
+hostssl     all             all             ::/0                    scram-sha-256
+
+# Alternative: md5 for older clients (less secure)
+# hostssl     all             all             0.0.0.0/0               md5
+# hostssl     all             all             ::/0                    md5
+
+# ===============================
+# SSL/TLS Connections - Client Certificate Authentication (Mutual TLS)
+# ===============================
+
+# For maximum security, require client certificates
+# Uncomment these lines to enable mutual TLS authentication
+#
+# hostssl     all             all             0.0.0.0/0               cert clientcert=verify-full
+# hostssl     all             all             ::/0                    cert clientcert=verify-full
+
+# Client certificate + password (dual authentication)
+# hostssl     all             all             0.0.0.0/0               cert clientcert=verify-full scram-sha-256
+# hostssl     all             all             ::/0                    cert clientcert=verify-full scram-sha-256
+
+# ===============================
+# Replication Connections
+# ===============================
+
+# Replication must also use SSL
+# Replace 'replication_user' with your actual replication user
+hostssl     replication     all             0.0.0.0/0               scram-sha-256
+hostssl     replication     all             ::/0                    scram-sha-256
+
+# ===============================
+# Specific User/Database Rules
+# ===============================
+
+# Example: Specific database with specific user
+# hostssl     mydb            myuser          192.168.1.0/24          scram-sha-256
+
+# Example: Admin users from specific network
+# hostssl     all             postgres        192.168.1.0/24          scram-sha-256
+
+# Example: Read-only user
+# hostssl     all             readonly_user   0.0.0.0/0               scram-sha-256
+
+# ===============================
+# Network Restrictions (Examples)
+# ===============================
+
+# Allow only from specific IP ranges
+# hostssl     all             all             192.168.1.0/24          scram-sha-256
+# hostssl     all             all             10.0.0.0/8              scram-sha-256
+
+# Allow from Docker network
+# hostssl     all             all             172.16.0.0/12           scram-sha-256
+
+# Allow from Kubernetes pod network
+# hostssl     all             all             10.244.0.0/16           scram-sha-256
+
+# ===============================
+# Security Best Practices
+# ===============================
+
+# 1. Always use hostssl (never host) in production
+# 2. Use scram-sha-256 instead of md5 when possible
+# 3. Restrict by IP address/network where possible
+# 4. Use client certificates for critical applications
+# 5. Monitor authentication failures in logs
+# 6. Keep this file readable only by postgres user (chmod 600)
+# 7. Reload config after changes: SELECT pg_reload_conf();
+# 8. Test changes carefully before production deployment
+
+# ===============================
+# Order Matters!
+# ===============================
+
+# PostgreSQL processes entries in order from top to bottom
+# First match wins - place more specific rules before general ones
+# Example order:
+#   1. Reject non-SSL
+#   2. Local connections
+#   3. Specific user/network combinations
+#   4. General SSL connections
+
+# ===============================
+# Configuration Reload
+# ===============================
+
+# To apply changes without restart:
+# docker exec ruvector-db psql -U postgres -c "SELECT pg_reload_conf();"
+#
+# Or from psql:
+# SELECT pg_reload_conf();
+
+# ===============================
+# Testing
+# ===============================
+
+# Test SSL connection:
+# psql "sslmode=require host=localhost user=myuser dbname=mydb"
+#
+# Test non-SSL rejection:
+# psql "sslmode=disable host=localhost user=myuser dbname=mydb"
+# (Should be rejected)
+#
+# Verify current connections:
+# SELECT datname, usename, client_addr, ssl FROM pg_stat_ssl
+# JOIN pg_stat_activity USING (pid);
+
+# ===============================
+# Common Authentication Methods
+# ===============================
+
+# trust       - Allow connection without password (NEVER use in production)
+# reject      - Reject connection unconditionally
+# scram-sha-256 - SCRAM-SHA-256 authentication (most secure)
+# md5         - MD5 password authentication (less secure)
+# password    - Plain text password (NEVER use)
+# peer        - Use OS username (local connections only)
+# ident       - Use identd protocol
+# cert        - SSL client certificate authentication
+# gss         - Kerberos/GSSAPI authentication
+# sspi        - Windows SSPI authentication
+# ldap        - LDAP authentication
+# radius      - RADIUS authentication
+# pam         - PAM authentication
+
+# ===============================
+# Monitoring Failed Attempts
+# ===============================
+
+# Enable connection logging in postgresql.conf:
+# log_connections = on
+# log_disconnections = on
+# log_hostname = on  # (warning: may slow connections)
+#
+# Then monitor logs for failed authentication:
+# docker logs ruvector-db | grep "authentication failed"
+# docker logs ruvector-db | grep "connection rejected"

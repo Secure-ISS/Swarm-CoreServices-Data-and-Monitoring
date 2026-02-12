@@ -9,9 +9,10 @@ This module provides tools for:
 - Query performance analysis
 """
 
+# Standard library imports
 import logging
-from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,9 @@ class IndexMonitor:
         Returns:
             List of unused indexes with schema, table, index name, and size
         """
-        with self.pool.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
+        with self.pool.project_cursor() as cur:
+            cur.execute(
+                """
                     SELECT
                         schemaname,
                         tablename,
@@ -53,18 +54,20 @@ class IndexMonitor:
                         AND indexrelname NOT LIKE 'pg_toast%'
                         AND pg_relation_size(indexrelid) / (1024 * 1024) >= %s
                     ORDER BY pg_relation_size(indexrelid) DESC;
-                """, (min_size_mb,))
+                """,
+                (min_size_mb,),
+            )
 
-                columns = [desc[0] for desc in cur.description]
-                results = [dict(zip(columns, row)) for row in cur.fetchall()]
+            columns = [desc[0] for desc in cur.description]
+            results = [dict(zip(columns, row)) for row in cur.fetchall()]
 
-                if results:
-                    total_wasted_mb = sum(r['size_mb'] for r in results)
-                    logger.warning(
-                        f"Found {len(results)} unused indexes wasting {total_wasted_mb:.2f} MB"
-                    )
+            if results:
+                total_wasted_mb = sum(r["size_mb"] for r in results)
+                logger.warning(
+                    f"Found {len(results)} unused indexes wasting {total_wasted_mb:.2f} MB"
+                )
 
-                return results
+            return results
 
     def get_missing_indexes(self, min_seq_scans: int = 1000) -> List[Dict[str, Any]]:
         """
@@ -76,9 +79,9 @@ class IndexMonitor:
         Returns:
             List of tables with high sequential scan counts
         """
-        with self.pool.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
+        with self.pool.project_cursor() as cur:
+            cur.execute(
+                """
                     SELECT
                         schemaname,
                         tablename,
@@ -96,15 +99,17 @@ class IndexMonitor:
                         AND schemaname NOT IN ('pg_catalog', 'information_schema')
                     ORDER BY seq_scan DESC
                     LIMIT 20;
-                """, (min_seq_scans,))
+                """,
+                (min_seq_scans,),
+            )
 
-                columns = [desc[0] for desc in cur.description]
-                results = [dict(zip(columns, row)) for row in cur.fetchall()]
+            columns = [desc[0] for desc in cur.description]
+            results = [dict(zip(columns, row)) for row in cur.fetchall()]
 
-                if results:
-                    logger.info(f"Found {len(results)} tables with high sequential scans")
+            if results:
+                logger.info(f"Found {len(results)} tables with high sequential scans")
 
-                return results
+            return results
 
     def get_index_statistics(self) -> Dict[str, Any]:
         """
@@ -113,47 +118,56 @@ class IndexMonitor:
         Returns:
             Dictionary with index statistics
         """
-        with self.pool.get_connection() as conn:
-            with conn.cursor() as cur:
-                # Total indexes
-                cur.execute("""
-                    SELECT COUNT(*) as total_indexes,
-                           SUM(pg_relation_size(indexrelid)) / (1024 * 1024) as total_size_mb
-                    FROM pg_stat_user_indexes;
-                """)
-                total_stats = cur.fetchone()
+        with self.pool.project_cursor() as cur:
+            # Total indexes
+            cur.execute(
+                """
+                SELECT COUNT(*) as total_indexes,
+                       SUM(pg_relation_size(indexrelid)) / (1024 * 1024) as total_size_mb
+                FROM pg_stat_user_indexes;
+            """
+            )
+            total_stats = cur.fetchone()
 
-                # Unused indexes
-                cur.execute("""
-                    SELECT COUNT(*) as unused_count,
-                           SUM(pg_relation_size(indexrelid)) / (1024 * 1024) as unused_size_mb
-                    FROM pg_stat_user_indexes
-                    WHERE idx_scan = 0;
-                """)
-                unused_stats = cur.fetchone()
+            # Unused indexes
+            cur.execute(
+                """
+                SELECT COUNT(*) as unused_count,
+                       SUM(pg_relation_size(indexrelid)) / (1024 * 1024) as unused_size_mb
+                FROM pg_stat_user_indexes
+                WHERE idx_scan = 0;
+            """
+            )
+            unused_stats = cur.fetchone()
 
-                # Most used indexes
-                cur.execute("""
-                    SELECT indexname, idx_scan
-                    FROM pg_stat_user_indexes
-                    ORDER BY idx_scan DESC
-                    LIMIT 5;
-                """)
-                top_indexes = cur.fetchall()
+            # Most used indexes
+            cur.execute(
+                """
+                SELECT indexname, idx_scan
+                FROM pg_stat_user_indexes
+                ORDER BY idx_scan DESC
+                LIMIT 5;
+            """
+            )
+            top_indexes = cur.fetchall()
 
-                return {
-                    'total_indexes': total_stats[0],
-                    'total_size_mb': round(total_stats[1] or 0, 2),
-                    'unused_count': unused_stats[0],
-                    'unused_size_mb': round(unused_stats[1] or 0, 2),
-                    'unused_percentage': round(
-                        (unused_stats[0] / total_stats[0] * 100) if total_stats[0] > 0 else 0,
-                        2
+            return {
+                "total_indexes": total_stats["total_indexes"],
+                "total_size_mb": round(total_stats["total_size_mb"] or 0, 2),
+                "unused_count": unused_stats["unused_count"],
+                "unused_size_mb": round(unused_stats["unused_size_mb"] or 0, 2),
+                "unused_percentage": round(
+                    (
+                        (unused_stats["unused_count"] / total_stats["total_indexes"] * 100)
+                        if total_stats["total_indexes"] > 0
+                        else 0
                     ),
-                    'top_indexes': [
-                        {'name': idx[0], 'scans': idx[1]} for idx in top_indexes
-                    ]
-                }
+                    2,
+                ),
+                "top_indexes": [
+                    {"name": idx["indexname"], "scans": idx["idx_scan"]} for idx in top_indexes
+                ],
+            }
 
     def analyze_index_health(self, index_name: str) -> Dict[str, Any]:
         """
@@ -165,9 +179,9 @@ class IndexMonitor:
         Returns:
             Dictionary with index health metrics
         """
-        with self.pool.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
+        with self.pool.project_cursor() as cur:
+            cur.execute(
+                """
                     SELECT
                         schemaname,
                         tablename,
@@ -178,14 +192,16 @@ class IndexMonitor:
                         pg_size_pretty(pg_relation_size(indexrelid)) as size
                     FROM pg_stat_user_indexes
                     WHERE indexname = %s;
-                """, (index_name,))
+                """,
+                (index_name,),
+            )
 
-                result = cur.fetchone()
-                if not result:
-                    return {'error': f'Index {index_name} not found'}
+            result = cur.fetchone()
+            if not result:
+                return {"error": f"Index {index_name} not found"}
 
-                columns = [desc[0] for desc in cur.description]
-                return dict(zip(columns, result))
+            columns = [desc[0] for desc in cur.description]
+            return dict(zip(columns, result))
 
 
 class PreparedStatementPool:
@@ -219,13 +235,12 @@ class PreparedStatementPool:
             logger.debug(f"Statement {name} already prepared")
             return
 
-        with self.pool.get_connection() as conn:
-            with conn.cursor() as cur:
-                # PostgreSQL PREPARE syntax
-                cur.execute(f"PREPARE {name} AS {sql}")
-                self._prepared[name] = sql
-                self._usage_stats[name] = 0
-                logger.info(f"Prepared statement: {name}")
+        with self.pool.project_cursor() as cur:
+            # PostgreSQL PREPARE syntax
+            cur.execute(f"PREPARE {name} AS {sql}")
+            self._prepared[name] = sql
+            self._usage_stats[name] = 0
+            logger.info(f"Prepared statement: {name}")
 
     def execute(self, name: str, params: Optional[Tuple] = None) -> List[Tuple]:
         """
@@ -241,21 +256,20 @@ class PreparedStatementPool:
         if name not in self._prepared:
             raise ValueError(f"Statement {name} not prepared. Call prepare() first.")
 
-        with self.pool.get_connection() as conn:
-            with conn.cursor() as cur:
-                # Execute prepared statement
-                if params:
-                    cur.execute(f"EXECUTE {name} ({','.join(['%s'] * len(params))})", params)
-                else:
-                    cur.execute(f"EXECUTE {name}")
+        with self.pool.project_cursor() as cur:
+            # Execute prepared statement
+            if params:
+                cur.execute(f"EXECUTE {name} ({','.join(['%s'] * len(params))})", params)
+            else:
+                cur.execute(f"EXECUTE {name}")
 
-                self._usage_stats[name] += 1
+            self._usage_stats[name] += 1
 
-                try:
-                    return cur.fetchall()
-                except:
-                    # For INSERT/UPDATE/DELETE
-                    return []
+            try:
+                return cur.fetchall()
+            except:
+                # For INSERT/UPDATE/DELETE
+                return []
 
     def get_stats(self) -> Dict[str, int]:
         """
@@ -276,25 +290,23 @@ class PreparedStatementPool:
         if name not in self._prepared:
             return
 
-        with self.pool.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"DEALLOCATE {name}")
-                del self._prepared[name]
-                del self._usage_stats[name]
-                logger.info(f"Deallocated statement: {name}")
+        with self.pool.project_cursor() as cur:
+            cur.execute(f"DEALLOCATE {name}")
+            del self._prepared[name]
+            del self._usage_stats[name]
+            logger.info(f"Deallocated statement: {name}")
 
 
 # Commonly used prepared statements for vector operations
 COMMON_STATEMENTS = {
-    'vector_search_namespace': """
+    "vector_search_namespace": """
         SELECT id, data, embedding <=> $1::ruvector AS distance
         FROM memory_entries
         WHERE namespace = $2
         ORDER BY distance
         LIMIT $3
     """,
-
-    'insert_memory_entry': """
+    "insert_memory_entry": """
         INSERT INTO memory_entries (id, namespace, data, embedding, created_at)
         VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (id) DO UPDATE
@@ -302,20 +314,18 @@ COMMON_STATEMENTS = {
             embedding = EXCLUDED.embedding,
             updated_at = NOW()
     """,
-
-    'get_pattern_by_id': """
+    "get_pattern_by_id": """
         SELECT id, pattern_type, data, confidence
         FROM patterns
         WHERE id = $1
     """,
-
-    'list_patterns_by_type': """
+    "list_patterns_by_type": """
         SELECT id, pattern_type, data, confidence, created_at
         FROM patterns
         WHERE pattern_type = $1
         ORDER BY confidence DESC
         LIMIT $2
-    """
+    """,
 }
 
 

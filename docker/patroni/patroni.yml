@@ -1,0 +1,103 @@
+scope: patroni-cluster
+name: ${PATRONI_NAME}
+
+restapi:
+  listen: ${PATRONI_RESTAPI_LISTEN}
+  connect_address: ${PATRONI_RESTAPI_CONNECT_ADDRESS}
+
+etcd3:
+  hosts: ${PATRONI_ETCD3_HOSTS}
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        # PostgreSQL configuration
+        max_connections: 200
+        shared_buffers: 256MB
+        effective_cache_size: 1GB
+        maintenance_work_mem: 64MB
+        checkpoint_completion_target: 0.9
+        wal_buffers: 16MB
+        default_statistics_target: 100
+        random_page_cost: 1.1
+        effective_io_concurrency: 200
+        work_mem: 1310kB
+        min_wal_size: 1GB
+        max_wal_size: 4GB
+        max_worker_processes: 4
+        max_parallel_workers_per_gather: 2
+        max_parallel_workers: 4
+        max_parallel_maintenance_workers: 2
+
+        # Replication settings
+        wal_level: replica
+        max_wal_senders: 10
+        max_replication_slots: 10
+        hot_standby: on
+        wal_log_hints: on
+
+        # Logging
+        log_destination: stderr
+        logging_collector: on
+        log_directory: /var/log/postgresql
+        log_filename: postgresql-%a.log
+        log_truncate_on_rotation: on
+        log_rotation_age: 1d
+        log_line_prefix: '%m [%p] %u@%d '
+        log_checkpoints: on
+        log_connections: on
+        log_disconnections: on
+        log_lock_waits: on
+        log_temp_files: 0
+        log_autovacuum_min_duration: 0
+
+        # RuVector settings
+        shared_preload_libraries: 'ruvector'
+
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+    - auth-host: scram-sha-256
+    - auth-local: trust
+
+  pg_hba:
+    - host replication replicator 0.0.0.0/0 md5
+    - host all all 0.0.0.0/0 md5
+    - local all all trust
+
+  users:
+    replicator:
+      password: ${PATRONI_REPLICATION_PASSWORD}
+      options:
+        - replication
+
+postgresql:
+  listen: ${PATRONI_POSTGRESQL_LISTEN}
+  connect_address: ${PATRONI_POSTGRESQL_CONNECT_ADDRESS}
+  data_dir: ${PATRONI_POSTGRESQL_DATA_DIR}
+  pgpass: /tmp/pgpass
+  authentication:
+    replication:
+      username: ${PATRONI_REPLICATION_USERNAME}
+      password: ${PATRONI_REPLICATION_PASSWORD}
+    superuser:
+      username: ${PATRONI_SUPERUSER_USERNAME}
+      password: ${PATRONI_SUPERUSER_PASSWORD}
+  parameters:
+    unix_socket_directories: '/var/run/postgresql'
+
+watchdog:
+  mode: off
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false

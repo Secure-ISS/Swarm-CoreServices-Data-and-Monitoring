@@ -4,23 +4,27 @@
 This script shows how to use bulk operations for faster data insertion
 compared to individual INSERT statements.
 """
+# Standard library imports
 import sys
 import time
 from pathlib import Path
+
+# Third-party imports
 from dotenv import load_dotenv
 
 # Add src directory to Python path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Load environment variables
 load_dotenv()
 
+# Local imports
 from db import (
-    get_pools,
-    store_memory,
     bulk_insert_memory_entries,
     bulk_insert_patterns,
-    bulk_insert_trajectories
+    bulk_insert_trajectories,
+    get_pools,
+    store_memory,
 )
 
 
@@ -35,16 +39,12 @@ def demo_basic_bulk_insert():
     # Generate 500 test entries
     entries = [
         {
-            'namespace': 'demo',
-            'key': f'bulk_entry_{i}',
-            'value': f'This is test entry {i} for bulk operations demo',
-            'embedding': [0.1 + i * 0.0001] * 384,
-            'metadata': {
-                'demo': True,
-                'batch': 'demo_1',
-                'index': i
-            },
-            'tags': ['demo', 'bulk', f'group_{i // 100}']
+            "namespace": "demo",
+            "key": f"bulk_entry_{i}",
+            "value": f"This is test entry {i} for bulk operations demo",
+            "embedding": [0.1 + i * 0.0001] * 384,
+            "metadata": {"demo": True, "batch": "demo_1", "index": i},
+            "tags": ["demo", "bulk", f"group_{i // 100}"],
         }
         for i in range(500)
     ]
@@ -77,12 +77,12 @@ def demo_performance_comparison():
     # Generate test data
     entries = [
         {
-            'namespace': 'perf_test',
-            'key': f'entry_{i}',
-            'value': f'Performance test entry {i}',
-            'embedding': [0.2 + i * 0.0001] * 384,
-            'metadata': {'index': i},
-            'tags': ['performance', 'comparison']
+            "namespace": "perf_test",
+            "key": f"entry_{i}",
+            "value": f"Performance test entry {i}",
+            "embedding": [0.2 + i * 0.0001] * 384,
+            "metadata": {"index": i},
+            "tags": ["performance", "comparison"],
         }
         for i in range(test_size)
     ]
@@ -95,12 +95,12 @@ def demo_performance_comparison():
         for entry in entries:
             store_memory(
                 cur,
-                entry['namespace'],
-                entry['key'],
-                entry['value'],
-                entry['embedding'],
-                entry['metadata'],
-                entry['tags']
+                entry["namespace"],
+                entry["key"],
+                entry["value"],
+                entry["embedding"],
+                entry["metadata"],
+                entry["tags"],
             )
 
     individual_time = time.time() - start
@@ -141,12 +141,12 @@ def demo_conflict_handling():
     # Initial batch
     initial_entries = [
         {
-            'namespace': 'conflict_demo',
-            'key': f'entry_{i}',
-            'value': f'Original value {i}',
-            'embedding': [0.3] * 384,
-            'metadata': {'version': 1},
-            'tags': ['original']
+            "namespace": "conflict_demo",
+            "key": f"entry_{i}",
+            "value": f"Original value {i}",
+            "embedding": [0.3] * 384,
+            "metadata": {"version": 1},
+            "tags": ["original"],
         }
         for i in range(50)
     ]
@@ -159,19 +159,19 @@ def demo_conflict_handling():
     # Overlapping batch with skip
     overlapping_entries = [
         {
-            'namespace': 'conflict_demo',
-            'key': f'entry_{i}',
-            'value': f'Updated value {i}',
-            'embedding': [0.4] * 384,
-            'metadata': {'version': 2},
-            'tags': ['updated']
+            "namespace": "conflict_demo",
+            "key": f"entry_{i}",
+            "value": f"Updated value {i}",
+            "embedding": [0.4] * 384,
+            "metadata": {"version": 2},
+            "tags": ["updated"],
         }
         for i in range(75)  # 0-74, overlaps with 0-49
     ]
 
     print(f"\nInserting {len(overlapping_entries)} entries with 'skip' conflict strategy...")
     with pools.project_cursor() as cur:
-        count = bulk_insert_memory_entries(cur, overlapping_entries, on_conflict='skip')
+        count = bulk_insert_memory_entries(cur, overlapping_entries, on_conflict="skip")
     print(f"✓ Inserted {count} new entries (25 new, 50 skipped)")
 
     # Verify count
@@ -183,29 +183,31 @@ def demo_conflict_handling():
     # Update with update strategy
     update_entries = [
         {
-            'namespace': 'conflict_demo',
-            'key': f'entry_{i}',
-            'value': f'FINAL value {i}',
-            'embedding': [0.5] * 384,
-            'metadata': {'version': 3, 'final': True},
-            'tags': ['final']
+            "namespace": "conflict_demo",
+            "key": f"entry_{i}",
+            "value": f"FINAL value {i}",
+            "embedding": [0.5] * 384,
+            "metadata": {"version": 3, "final": True},
+            "tags": ["final"],
         }
         for i in range(75)
     ]
 
     print(f"\nInserting {len(update_entries)} entries with 'update' conflict strategy...")
     with pools.project_cursor() as cur:
-        count = bulk_insert_memory_entries(cur, update_entries, on_conflict='update')
+        count = bulk_insert_memory_entries(cur, update_entries, on_conflict="update")
     print(f"✓ Updated {count} entries")
 
     # Verify updates
     with pools.project_cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            """
             SELECT COUNT(*) as cnt
             FROM memory_entries
             WHERE namespace = 'conflict_demo'
               AND value LIKE 'FINAL%'
-        """)
+        """
+        )
         result = cur.fetchone()
     print(f"✓ Entries with 'FINAL' value: {result['cnt']}")
 
@@ -226,14 +228,14 @@ def demo_multi_table_bulk():
     # 1. Bulk insert patterns
     patterns = [
         {
-            'name': f'demo_pattern_{i}',
-            'pattern_type': f'demo_type_{i % 3}',
-            'description': f'Demo pattern {i} for bulk operations',
-            'embedding': [0.6 + i * 0.001] * 384,
-            'confidence': 0.7 + (i % 10) * 0.02,
-            'usage_count': i * 5,
-            'success_count': i * 4,
-            'metadata': {'demo': True, 'category': 'test'}
+            "name": f"demo_pattern_{i}",
+            "pattern_type": f"demo_type_{i % 3}",
+            "description": f"Demo pattern {i} for bulk operations",
+            "embedding": [0.6 + i * 0.001] * 384,
+            "confidence": 0.7 + (i % 10) * 0.02,
+            "usage_count": i * 5,
+            "success_count": i * 4,
+            "metadata": {"demo": True, "category": "test"},
         }
         for i in range(30)
     ]
@@ -248,13 +250,13 @@ def demo_multi_table_bulk():
     # 2. Bulk insert trajectories
     trajectories = [
         {
-            'trajectory_id': f'demo_traj_{i // 5}',
-            'step_number': i % 5,
-            'action': f'action_{i % 3}',
-            'state': {'position': i, 'velocity': i * 0.5},
-            'reward': float(i % 4),
-            'embedding': [0.7 + i * 0.001] * 384,
-            'metadata': {'demo': True, 'experiment': 'bulk_demo'}
+            "trajectory_id": f"demo_traj_{i // 5}",
+            "step_number": i % 5,
+            "action": f"action_{i % 3}",
+            "state": {"position": i, "velocity": i * 0.5},
+            "reward": float(i % 4),
+            "embedding": [0.7 + i * 0.001] * 384,
+            "metadata": {"demo": True, "experiment": "bulk_demo"},
         }
         for i in range(50)
     ]
@@ -304,5 +306,5 @@ def main():
         raise
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

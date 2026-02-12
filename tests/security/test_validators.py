@@ -1,12 +1,15 @@
 """Tests for security validators module."""
 
+# Third-party imports
 import pytest
+
+# Local imports
 from src.domains.security.validators import (
     InputValidator,
     ValidationError,
-    validate_sql_input,
-    validate_connection_params,
     sanitize_identifier,
+    validate_connection_params,
+    validate_sql_input,
 )
 
 
@@ -81,11 +84,11 @@ class TestInputValidator:
     def test_validate_connection_params_valid(self):
         """Test validation of valid connection parameters."""
         params = {
-            'host': 'localhost',
-            'port': 5432,
-            'database': 'test_db',
-            'user': 'test_user',
-            'password': 'secret123'
+            "host": "localhost",
+            "port": 5432,
+            "database": "test_db",
+            "user": "test_user",
+            "password": "secret123",
         }
 
         result = InputValidator.validate_connection_params(params)
@@ -94,8 +97,8 @@ class TestInputValidator:
     def test_validate_connection_params_missing_required(self):
         """Test validation fails with missing required params."""
         params = {
-            'host': 'localhost',
-            'port': 5432,
+            "host": "localhost",
+            "port": 5432,
             # Missing database and user
         }
 
@@ -107,10 +110,10 @@ class TestInputValidator:
     def test_validate_connection_params_invalid_port(self):
         """Test validation fails with invalid port."""
         params = {
-            'host': 'localhost',
-            'port': 99999,  # Invalid port
-            'database': 'test_db',
-            'user': 'test_user',
+            "host": "localhost",
+            "port": 99999,  # Invalid port
+            "database": "test_db",
+            "user": "test_user",
         }
 
         with pytest.raises(ValidationError) as exc_info:
@@ -121,10 +124,10 @@ class TestInputValidator:
     def test_validate_connection_params_invalid_host(self):
         """Test validation fails with invalid host."""
         params = {
-            'host': 'invalid;host',  # Suspicious characters
-            'port': 5432,
-            'database': 'test_db',
-            'user': 'test_user',
+            "host": "invalid;host",  # Suspicious characters
+            "port": 5432,
+            "database": "test_db",
+            "user": "test_user",
         }
 
         with pytest.raises(ValidationError) as exc_info:
@@ -164,10 +167,10 @@ class TestInputValidator:
 
         # validate_connection_params
         params = {
-            'host': 'localhost',
-            'port': 5432,
-            'database': 'test_db',
-            'user': 'test_user',
+            "host": "localhost",
+            "port": 5432,
+            "database": "test_db",
+            "user": "test_user",
         }
         result = validate_connection_params(params)
         assert result == params
@@ -176,5 +179,5 @@ class TestInputValidator:
         assert sanitize_identifier("valid_table") == "valid_table"
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

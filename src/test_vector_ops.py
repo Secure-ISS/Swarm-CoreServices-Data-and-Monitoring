@@ -7,6 +7,7 @@ This script verifies:
 3. HNSW indexes are working
 4. Vector similarity search is performant
 """
+# Standard library imports
 import os
 import sys
 import time
@@ -15,9 +16,12 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Third-party imports
 from dotenv import load_dotenv
-from db.pool import DualDatabasePools, get_pools, close_pools
-from db.vector_ops import store_memory, search_memory, retrieve_memory, count_memories
+
+# Local imports
+from db.pool import DualDatabasePools, close_pools, get_pools
+from db.vector_ops import count_memories, retrieve_memory, search_memory, store_memory
 
 # Load environment variables
 load_dotenv()
@@ -34,8 +38,8 @@ def test_connection_health():
 
     # Project database
     print("\n📊 Project Database:")
-    proj = health['project']
-    if proj['status'] == 'healthy':
+    proj = health["project"]
+    if proj["status"] == "healthy":
         print(f"  ✅ Status: {proj['status']}")
         print(f"  📦 Database: {proj['database']}")
         print(f"  👤 User: {proj['user']}")
@@ -46,8 +50,8 @@ def test_connection_health():
 
     # Shared database
     print("\n📚 Shared Knowledge Database:")
-    shared = health['shared']
-    if shared['status'] == 'healthy':
+    shared = health["shared"]
+    if shared["status"] == "healthy":
         print(f"  ✅ Status: {shared['status']}")
         print(f"  📦 Database: {shared['database']}")
         print(f"  👤 User: {shared['user']}")
@@ -69,7 +73,8 @@ def test_hnsw_indexes():
 
     with pools.project_cursor() as cur:
         # Check for HNSW indexes by looking at index access method
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
                 schemaname,
                 tablename,
@@ -78,7 +83,8 @@ def test_hnsw_indexes():
             FROM pg_indexes
             WHERE indexdef LIKE '%USING hnsw%'
             ORDER BY tablename
-        """)
+        """
+        )
 
         indexes = cur.fetchall()
         if not indexes:
@@ -107,20 +113,20 @@ def test_vector_storage_and_retrieval():
             "key": "postgres-cluster-1",
             "value": "Distributed PostgreSQL cluster with automatic failover",
             "embedding": [0.1] * 384,  # Simple test embedding
-            "metadata": {"type": "cluster-info", "version": "1.0"}
+            "metadata": {"type": "cluster-info", "version": "1.0"},
         },
         {
             "key": "postgres-cluster-2",
             "value": "High-availability PostgreSQL setup with replication",
             "embedding": [0.2] * 384,
-            "metadata": {"type": "cluster-info", "version": "2.0"}
+            "metadata": {"type": "cluster-info", "version": "2.0"},
         },
         {
             "key": "postgres-cluster-3",
             "value": "Sharded PostgreSQL configuration for scalability",
             "embedding": [0.15] * 384,
-            "metadata": {"type": "cluster-info", "version": "3.0"}
-        }
+            "metadata": {"type": "cluster-info", "version": "3.0"},
+        },
     ]
 
     # Store test data
@@ -133,7 +139,7 @@ def test_vector_storage_and_retrieval():
                 key=item["key"],
                 value=item["value"],
                 embedding=item["embedding"],
-                metadata=item["metadata"]
+                metadata=item["metadata"],
             )
     print(f"  ✅ Stored {len(test_data)} vectors")
 
@@ -173,11 +179,7 @@ def test_vector_similarity_search():
 
     with pools.project_cursor() as cur:
         results = search_memory(
-            cur,
-            namespace=namespace,
-            query_embedding=query_embedding,
-            limit=5,
-            min_similarity=0.5
+            cur, namespace=namespace, query_embedding=query_embedding, limit=5, min_similarity=0.5
         )
 
     elapsed_ms = (time.time() - start_time) * 1000
@@ -186,7 +188,7 @@ def test_vector_similarity_search():
     print(f"  📊 Found {len(results)} results:")
 
     for i, result in enumerate(results, 1):
-        similarity = result['similarity']
+        similarity = result["similarity"]
         print(f"\n     {i}. {result['key']} (similarity: {similarity:.4f})")
         print(f"        {result['value'][:60]}...")
 
@@ -231,10 +233,13 @@ def cleanup_test_data():
     namespace = "test-distributed-postgres-cluster"
 
     with pools.project_cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            """
             DELETE FROM memory_entries
             WHERE namespace = %s
-        """, (namespace,))
+        """,
+            (namespace,),
+        )
         print(f"  ✅ Cleaned up test namespace: {namespace}")
 
 
@@ -291,7 +296,9 @@ def main():
 
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")
+        # Standard library imports
         import traceback
+
         traceback.print_exc()
         return 1
     finally:

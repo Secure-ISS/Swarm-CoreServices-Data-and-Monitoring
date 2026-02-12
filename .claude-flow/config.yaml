@@ -61,29 +61,55 @@ memory:
 
   # PostgreSQL Connection Settings
   postgresql:
-    # Project Database
-    project:
-      host: localhost
-      port: 5432
+    # Operating Mode: single-node | patroni-ha
+    mode: single-node
+
+    # Single-Node Configuration
+    singleNode:
+      # Project Database
+      project:
+        host: localhost
+        port: 5432
+        database: distributed_postgres_cluster
+        user: dpg_cluster
+        password: ${DPG_CLUSTER_PASSWORD}  # Use environment variable
+        namespace: distributed-postgres-cluster
+        poolSize: 40                        # Increased from 25 (4x from original 10)
+        maxRetries: 3
+        connectionTimeout: 5000
+
+      # Shared Knowledge Database
+      shared:
+        host: localhost
+        port: 5432
+        database: claude_flow_shared
+        user: shared_user
+        password: ${SHARED_DB_PASSWORD}     # Use environment variable
+        namespace: claude-flow-v3-learnings
+        poolSize: 15                        # Increased from 10 (3x from original 5)
+        maxRetries: 3
+        connectionTimeout: 5000
+
+    # Patroni HA Configuration
+    patroni:
+      enabled: false
+      # Patroni REST API endpoints
+      apiHosts:
+        - localhost
+      apiPort: 8008
+      # Database credentials
       database: distributed_postgres_cluster
       user: dpg_cluster
-      password: ${DPG_CLUSTER_PASSWORD}  # Use environment variable
-      namespace: distributed-postgres-cluster
-      poolSize: 25                        # Increased from 10 (2.5x capacity)
-      maxRetries: 3
-      connectionTimeout: 5000
-
-    # Shared Knowledge Database
-    shared:
-      host: localhost
-      port: 5432
-      database: claude_flow_shared
-      user: shared_user
-      password: ${SHARED_DB_PASSWORD}     # Use environment variable
-      namespace: claude-flow-v3-learnings
-      poolSize: 10                        # Increased from 5 (2x capacity)
-      maxRetries: 3
-      connectionTimeout: 5000
+      password: ${PATRONI_PASSWORD}
+      # Connection pool settings
+      minConnections: 2
+      maxConnections: 20
+      # Health check settings
+      healthCheckInterval: 30
+      apiTimeout: 5
+      # Failover settings
+      failoverTimeout: 30
+      maxRetryAttempts: 3
 
   # HNSW Configuration (4x Accuracy - High Memory)
   hnsw:

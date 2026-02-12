@@ -65,8 +65,8 @@ npx @claude-flow/cli@latest memory search --query "hooks" --namespace claude-flo
 docker exec -it ruvector-db psql -U shared_user -d claude_flow_shared
 
 # List all shared knowledge
-SELECT key FROM memory_entries 
-WHERE namespace = 'claude-flow-v3-learnings' 
+SELECT key FROM memory_entries
+WHERE namespace = 'claude-flow-v3-learnings'
 ORDER BY key;
 ```
 

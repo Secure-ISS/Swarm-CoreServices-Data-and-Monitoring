@@ -1,12 +1,17 @@
 """Tests for path security module."""
 
-import pytest
+# Standard library imports
 from pathlib import Path
+
+# Third-party imports
+import pytest
+
+# Local imports
 from src.domains.security.path_security import (
-    PathValidator,
     PathSecurityError,
-    validate_file_path,
+    PathValidator,
     secure_path_join,
+    validate_file_path,
 )
 
 
@@ -223,5 +228,5 @@ class TestSecurityProperties:
         assert result == unicode_file.resolve()
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

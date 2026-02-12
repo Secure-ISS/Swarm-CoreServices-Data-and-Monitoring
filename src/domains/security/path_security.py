@@ -4,16 +4,18 @@ Provides secure file path handling to prevent path traversal attacks
 and unauthorized file system access.
 """
 
-import os
+# Standard library imports
 import logging
+import os
 from pathlib import Path
-from typing import Union, Optional
+from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
 
 
 class PathSecurityError(Exception):
     """Raised when path security validation fails."""
+
     pass
 
 
@@ -46,7 +48,9 @@ class PathValidator:
                 self.allowed_base_paths.append(resolved)
                 logger.debug(f"Allowed base path: {resolved}")
 
-    def validate_path(self, path: Union[str, Path], base_path: Optional[Union[str, Path]] = None) -> Path:
+    def validate_path(
+        self, path: Union[str, Path], base_path: Optional[Union[str, Path]] = None
+    ) -> Path:
         """Validate and resolve a file path securely.
 
         Args:
@@ -67,7 +71,7 @@ class PathValidator:
 
         # Check for null bytes (path injection)
         path_str = str(path_obj)
-        if '\x00' in path_str:
+        if "\x00" in path_str:
             raise PathSecurityError("Path contains null bytes")
 
         # Resolve to absolute path (follows symlinks and normalizes)
@@ -124,13 +128,13 @@ class PathValidator:
 
         # Suspicious patterns (even in resolved paths)
         suspicious = [
-            '/etc/passwd',
-            '/etc/shadow',
-            '/root/',
-            '/proc/',
-            '/sys/',
-            '/.ssh/',
-            '/private/',  # macOS
+            "/etc/passwd",
+            "/etc/shadow",
+            "/root/",
+            "/proc/",
+            "/sys/",
+            "/.ssh/",
+            "/private/",  # macOS
         ]
 
         for pattern in suspicious:
@@ -164,7 +168,7 @@ class PathValidator:
                 continue
 
             # Check for traversal attempts
-            if '..' in part or part.startswith('/'):
+            if ".." in part or part.startswith("/"):
                 raise PathSecurityError(f"Path component contains traversal: {part}")
 
             result = result / part
@@ -185,19 +189,19 @@ class PathValidator:
             return False
 
         # Check for path separators
-        if '/' in filename or '\\' in filename:
+        if "/" in filename or "\\" in filename:
             return False
 
         # Check for traversal
-        if '..' in filename:
+        if ".." in filename:
             return False
 
         # Check for null bytes
-        if '\x00' in filename:
+        if "\x00" in filename:
             return False
 
         # Check for suspicious characters
-        suspicious_chars = ['<', '>', ':', '"', '|', '?', '*']
+        suspicious_chars = ["<", ">", ":", '"', "|", "?", "*"]
         if any(char in filename for char in suspicious_chars):
             return False
 
@@ -208,7 +212,7 @@ class PathValidator:
 def validate_file_path(
     path: Union[str, Path],
     base_path: Optional[Union[str, Path]] = None,
-    allowed_bases: Optional[list] = None
+    allowed_bases: Optional[list] = None,
 ) -> Path:
     """Convenience function to validate a file path.
 
