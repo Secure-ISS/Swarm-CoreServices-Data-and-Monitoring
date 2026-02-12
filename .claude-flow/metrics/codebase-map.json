@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-02-12T07:13:41.653Z",
+  "projectRoot": "/home/matt/projects/Distributed-Postgress-Cluster",
+  "structure": {
+    "hasPackageJson": false,
+    "hasTsConfig": false,
+    "hasClaudeConfig": true,
+    "hasClaudeFlow": true
+  },
+  "scannedAt": 1770880421653
+}
